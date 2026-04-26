@@ -1,8 +1,8 @@
 """
 Caspian Corridor Intelligence — Backend
 FastAPI + PostGIS + WebSocket
+New panels: Dynamic Rescheduling · Azersky Satellite · Anomaly Detection · ETA Forecast
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -12,21 +12,22 @@ import os
 import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 
 import asyncpg
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from ai_engine import ai_core
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
-# DB bağlantısı
+# DB
 # ---------------------------------------------------------------------------
-
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://caspian:12345@db:5432/caspian_db")
-
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://caspian:12345@db:5432/caspian_db"
+)
 pool: asyncpg.Pool | None = None
 
 
@@ -39,23 +40,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
 
 app = FastAPI(title="Caspian Corridor Intelligence API", lifespan=lifespan)
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 @app.get("/")
 async def read_index():
-    return FileResponse('static/index.html')
+    return FileResponse("static/index.html")
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # production-da dəqiq origin yazın
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+BAKU_PORT = (49.865, 40.342)
 
 # ---------------------------------------------------------------------------
-# Modellər
+# Pydantic modellər
 # ---------------------------------------------------------------------------
 
 class VesselOut(BaseModel):
@@ -101,44 +104,25 @@ class ETAResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Yardımçı funksiyalar
+# Yardımçı
 # ---------------------------------------------------------------------------
-
-BAKU_PORT = (49.865, 40.342)   # (lon, lat)
-
-
-def haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """İki GPS nöqtəsi arasındakı məsafəni km-lə hesab edir."""
+def haversine_km(lon1, lat1, lon2, lat2):
     R = 6371.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def calculate_eta(lon: float, lat: float, speed_knots: float, cargo_tons: float) -> ETAResponse:
-    """
-    Sadə ETA modeli:
-      - Məsafə → Haversine
-      - Sürət azalması: yük ağırlığına görə (+hava faktoru)
-      - Confidence: sürət sabitliyinə görə
-    """
+def calculate_eta(lon, lat, speed_knots, cargo_tons):
     dist_km = haversine_km(lon, lat, BAKU_PORT[0], BAKU_PORT[1])
-    dist_nm = dist_km / 1.852          # nautical mile
-
-    # Hava faktoru: real sistemdə MeteoAz API-dan gələr
+    dist_nm = dist_km / 1.852
     weather_factor = round(random.uniform(0.88, 1.0), 2)
-
-    # Yük ağırlığı sürəti azaldır (hər 100 ton = 0.05 knot)
     effective_speed = max(2.0, speed_knots * weather_factor - (cargo_tons / 100) * 0.05)
-
     hours = dist_nm / effective_speed if effective_speed > 0 else 99
     eta_dt = datetime.now(timezone.utc) + timedelta(hours=hours)
-
-    # Confidence: sürət + məsafəyə görə
     confidence = round(max(0.4, min(0.97, 1.0 - (dist_km / 1500) * 0.4)), 2)
-
     return ETAResponse(
         mmsi="",
         eta=eta_dt,
@@ -150,7 +134,7 @@ def calculate_eta(lon: float, lat: float, speed_knots: float, cargo_tons: float)
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Əsas Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
@@ -160,7 +144,6 @@ async def health():
 
 @app.get("/vessels", response_model=list[VesselOut])
 async def get_vessels(status: Optional[str] = None):
-    """Bütün gəmiləri qaytarır. ?status=active ilə filter olunur."""
     query = """
         SELECT mmsi, name, vessel_type, flag,
                ST_X(location) AS lon, ST_Y(location) AS lat,
@@ -191,21 +174,16 @@ async def get_vessel(mmsi: str):
 
 @app.get("/vessels/{mmsi}/eta", response_model=ETAResponse)
 async def get_vessel_eta(mmsi: str):
-    """Gəminin Bakı limanına gəliş proqnozu."""
     row = await pool.fetchrow(
         "SELECT mmsi, ST_X(location) AS lon, ST_Y(location) AS lat, "
-        "speed_knots, cargo_tons FROM vessels WHERE mmsi = $1",
-        mmsi,
+        "speed_knots, cargo_tons FROM vessels WHERE mmsi = $1", mmsi
     )
     if not row:
         raise HTTPException(status_code=404, detail="Gəmi tapılmadı")
-
     result = calculate_eta(row["lon"], row["lat"], row["speed_knots"], row["cargo_tons"])
     result.mmsi = mmsi
-
-    # DB-ni yenilə
     await pool.execute(
-        "UPDATE vessels SET eta = $1, eta_confidence = $2, updated_at = NOW() WHERE mmsi = $3",
+        "UPDATE vessels SET eta=$1, eta_confidence=$2, updated_at=NOW() WHERE mmsi=$3",
         result.eta, result.confidence, mmsi,
     )
     return result
@@ -213,7 +191,6 @@ async def get_vessel_eta(mmsi: str):
 
 @app.get("/port/summary", response_model=PortSummary)
 async def get_port_summary():
-    """Bu gün Bakı limanına gəlməsi gözlənilən gəmilər + vaqon tələbatı."""
     query = """
         SELECT mmsi, name, vessel_type, cargo_tons, eta, eta_confidence,
                ST_X(location) AS lon, ST_Y(location) AS lat
@@ -223,11 +200,8 @@ async def get_port_summary():
         ORDER BY eta ASC
     """
     rows = await pool.fetch(query)
-
     total_cargo = sum(r["cargo_tons"] for r in rows)
-    # Hər 80 ton yük ≈ 1 vaqon (orta standart)
     wagons = math.ceil(total_cargo / 80)
-
     return PortSummary(
         arrivals_today=len(rows),
         total_cargo_tons=round(total_cargo, 1),
@@ -240,7 +214,7 @@ async def get_port_summary():
 async def get_alerts(resolved: bool = False):
     rows = await pool.fetch(
         "SELECT id, vessel_mmsi, alert_type, severity, message, created_at "
-        "FROM alerts WHERE resolved = $1 ORDER BY created_at DESC LIMIT 50",
+        "FROM alerts WHERE resolved=$1 ORDER BY created_at DESC LIMIT 50",
         resolved,
     )
     return [dict(r) for r in rows]
@@ -248,7 +222,6 @@ async def get_alerts(resolved: bool = False):
 
 @app.get("/vessels/nearby/port")
 async def vessels_near_port(radius_km: float = 50):
-    """Bakı limanına {radius_km} km yaxın gəmilər."""
     query = """
         SELECT mmsi, name, vessel_type,
                ST_X(location) AS lon, ST_Y(location) AS lat,
@@ -269,9 +242,128 @@ async def vessels_near_port(radius_km: float = 50):
 
 
 # ---------------------------------------------------------------------------
+# YENİ: Dynamic Rescheduling  /api/reschedule
+# ---------------------------------------------------------------------------
+@app.get("/api/reschedule")
+async def api_reschedule():
+    """
+    Bütün aktiv gəmiləri götürüb dynamic rescheduling hesabı edir.
+    Hava + ETA + Vaqon planı qaytarır.
+    """
+    rows = await pool.fetch(
+        "SELECT mmsi, name, ST_X(location) AS lon, ST_Y(location) AS lat, "
+        "speed_knots, course_deg, cargo_tons, status "
+        "FROM vessels WHERE status = 'active'"
+    )
+    vessels = [dict(r) for r in rows]
+    result = ai_core.dynamic_rail_sync(vessels)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# YENİ: Azersky Satellite Feed  /api/satellite
+# ---------------------------------------------------------------------------
+@app.get("/api/satellite")
+async def api_satellite():
+    """Azersky peyk məlumatları (AzerSpace-2 stub)."""
+    feed = ai_core.get_satellite_feed()
+    # Aktiv gəmilərin sayını DB-dən əlavə et
+    count = await pool.fetchval("SELECT COUNT(*) FROM vessels WHERE status='active'")
+    feed["db_active_vessels"] = count
+    return feed
+
+
+# ---------------------------------------------------------------------------
+# YENİ: Anomaliya Aşkarlanması  /api/anomalies
+# ---------------------------------------------------------------------------
+@app.get("/api/anomalies")
+async def api_anomalies():
+    """Bütün aktiv gəmilər üçün anomaliya skanı."""
+    rows = await pool.fetch(
+        "SELECT mmsi, name, ST_X(location) AS lon, ST_Y(location) AS lat, "
+        "speed_knots, course_deg, cargo_tons, status "
+        "FROM vessels"
+    )
+    weather = ai_core.get_current_weather()
+    results = []
+    for r in rows:
+        anom = ai_core.detect_anomaly(
+            r["mmsi"], r["lon"], r["lat"],
+            r["speed_knots"], r["course_deg"],
+            r["status"], r["cargo_tons"], weather
+        )
+        results.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            **anom,
+        })
+    anomaly_count = sum(1 for x in results if x["anomaly"])
+    return {
+        "weather": weather,
+        "total_scanned": len(results),
+        "anomaly_count": anomaly_count,
+        "results": results,
+        "scanned_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+# ---------------------------------------------------------------------------
+# YENİ: ETA Proqnozu (bütün gəmilər)  /api/eta/all
+# ---------------------------------------------------------------------------
+@app.get("/api/eta/all")
+async def api_eta_all():
+    """Bütün gəmilər üçün AI-based ETA proqnozu."""
+    rows = await pool.fetch(
+        "SELECT mmsi, name, vessel_type, flag, "
+        "ST_X(location) AS lon, ST_Y(location) AS lat, "
+        "speed_knots, cargo_tons, destination, status "
+        "FROM vessels ORDER BY mmsi"
+    )
+    weather = ai_core.get_current_weather()
+    results = []
+    for r in rows:
+        eta_info = ai_core.calculate_eta(
+            r["lon"], r["lat"], r["speed_knots"], r["cargo_tons"], weather
+        )
+        results.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            "vessel_type": r["vessel_type"],
+            "flag": r["flag"],
+            "destination": r["destination"],
+            "status": r["status"],
+            **eta_info,
+        })
+    results.sort(key=lambda x: x["hours_remaining"])
+    return {
+        "weather": weather,
+        "vessel_count": len(results),
+        "eta_list": results,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+# ---------------------------------------------------------------------------
+# YENİ: Tək gəmi üçün AI ETA  /api/eta/{mmsi}
+# ---------------------------------------------------------------------------
+@app.get("/api/eta/{mmsi}")
+async def api_eta_vessel(mmsi: str):
+    row = await pool.fetchrow(
+        "SELECT mmsi, name, ST_X(location) AS lon, ST_Y(location) AS lat, "
+        "speed_knots, cargo_tons, destination FROM vessels WHERE mmsi=$1", mmsi
+    )
+    if not row:
+        raise HTTPException(404, "Gəmi tapılmadı")
+    weather = ai_core.get_current_weather(row["lat"], row["lon"])
+    eta_info = ai_core.calculate_eta(
+        row["lon"], row["lat"], row["speed_knots"], row["cargo_tons"], weather
+    )
+    return {"mmsi": mmsi, "name": row["name"], "weather": weather, **eta_info}
+
+
+# ---------------------------------------------------------------------------
 # WebSocket — real vaxt gəmi hərəkəti
 # ---------------------------------------------------------------------------
-
 class ConnectionManager:
     def __init__(self):
         self.active: list[WebSocket] = []
@@ -281,7 +373,8 @@ class ConnectionManager:
         self.active.append(ws)
 
     def disconnect(self, ws: WebSocket):
-        self.active.remove(ws)
+        if ws in self.active:
+            self.active.remove(ws)
 
     async def broadcast(self, data: dict):
         msg = json.dumps(data, default=str)
@@ -299,11 +392,6 @@ manager = ConnectionManager()
 
 
 async def simulate_vessel_movement():
-    """
-    Demo rejimi: hər 5 saniyədə gəmilərin mövqeyini
-    Bakı limanına doğru bir az irəlilədib broadcast edir.
-    Real sistemdə AIS API-dan gəlir.
-    """
     while True:
         await asyncio.sleep(5)
         if not manager.active or pool is None:
@@ -315,15 +403,13 @@ async def simulate_vessel_movement():
             )
             updates = []
             for r in rows:
-                # Bakı limanına doğru hər addımda ~0.002° irəlilə
                 dlon = (BAKU_PORT[0] - r["lon"]) * 0.002
                 dlat = (BAKU_PORT[1] - r["lat"]) * 0.002
                 new_lon = r["lon"] + dlon + random.uniform(-0.001, 0.001)
                 new_lat = r["lat"] + dlat + random.uniform(-0.001, 0.001)
-
                 await pool.execute(
-                    "UPDATE vessels SET location = ST_SetSRID(ST_MakePoint($1,$2),4326), "
-                    "last_seen = NOW() WHERE mmsi = $3",
+                    "UPDATE vessels SET location=ST_SetSRID(ST_MakePoint($1,$2),4326), "
+                    "last_seen=NOW() WHERE mmsi=$3",
                     new_lon, new_lat, r["mmsi"],
                 )
                 updates.append({
@@ -336,7 +422,6 @@ async def simulate_vessel_movement():
                     "status": r["status"],
                     "ts": datetime.now(timezone.utc).isoformat(),
                 })
-
             if updates:
                 await manager.broadcast({"vessels": updates})
         except Exception as e:
@@ -345,14 +430,8 @@ async def simulate_vessel_movement():
 
 @app.websocket("/ws/vessels")
 async def vessel_stream(ws: WebSocket):
-    """
-    Frontend bu endpoint-ə qoşulur.
-    Qoşulduqda mövcud gəmiləri göndərir,
-    sonra hər 5 saniyədə yenilənmiş mövqeləri alır.
-    """
     await manager.connect(ws)
     try:
-        # Qoşulduqda bütün gəmiləri göndər
         rows = await pool.fetch(
             "SELECT mmsi, name, vessel_type, flag, "
             "ST_X(location) AS lon, ST_Y(location) AS lat, "
@@ -363,10 +442,8 @@ async def vessel_stream(ws: WebSocket):
             "type": "initial",
             "vessels": [dict(r) for r in rows],
         }, default=str))
-
-        # Bağlantını açıq saxla
         while True:
-            await ws.receive_text()   # ping gözlə
+            await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(ws)
 

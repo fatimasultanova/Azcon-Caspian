@@ -1,877 +1,855 @@
 <!DOCTYPE html>
 <html lang="az">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Azcon · Caspian Corridor Intelligence</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --bg:        #050b14;
-      --surface:   #0a1628;
-      --panel:     #0d1e35;
-      --border:    rgba(0,180,255,0.12);
-      --accent:    #00b4ff;
-      --accent2:   #00e5aa;
-      --danger:    #ff4d6d;
-      --warn:      #ffaa00;
-      --text:      #c8dff0;
-      --muted:     #4a6b8a;
-      --mono:      'Space Mono', monospace;
-      --sans:      'Syne', sans-serif;
-    }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Azcon · Caspian Corridor Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;500;700;900&family=Barlow:wght@300;400;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* ===================== DESIGN TOKENS ===================== */
+:root {
+  --bg:        #07090f;
+  --surface:   #0d1117;
+  --card:      #111827;
+  --border:    #1e2d40;
+  --accent:    #00d4ff;
+  --accent2:   #00ff9d;
+  --warn:      #ffaa00;
+  --danger:    #ff4060;
+  --muted:     #4a6076;
+  --text:      #c8d8e8;
+  --text-dim:  #6b8499;
+  --font-mono: 'Share Tech Mono', monospace;
+  --font-ui:   'Barlow Condensed', sans-serif;
+  --font-body: 'Barlow', sans-serif;
+  --radius:    6px;
+  --glow:      0 0 18px rgba(0,212,255,.25);
+  --glow2:     0 0 14px rgba(0,255,157,.2);
+}
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ===================== RESET ===================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--sans);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow-x: hidden;
-    }
+/* ===================== TOP BAR ===================== */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 999;
+}
+.logo {
+  font-family: var(--font-ui);
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-shadow: var(--glow);
+}
+.logo span { color: var(--accent2); }
+.header-meta {
+  display: flex; gap: 24px; align-items: center;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent2);
+  box-shadow: 0 0 8px var(--accent2);
+  animation: pulse 1.5s infinite;
+  display: inline-block; margin-right: 6px;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-    /* ── Animated sea background ── */
-    body::before {
-      content: '';
-      position: fixed; inset: 0; z-index: 0;
-      background:
-        radial-gradient(ellipse 120% 60% at 60% 100%, rgba(0,60,120,0.35) 0%, transparent 70%),
-        radial-gradient(ellipse 80% 40% at 20% 80%, rgba(0,100,180,0.15) 0%, transparent 60%);
-      pointer-events: none;
-    }
+/* ===================== LAYOUT ===================== */
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr 340px;
+  grid-template-rows: auto 1fr;
+  height: calc(100vh - 52px);
+}
+.sidebar-left  { grid-row: 1 / 3; border-right: 1px solid var(--border); overflow-y: auto; }
+.main-center   { grid-row: 1 / 3; display: flex; flex-direction: column; }
+.sidebar-right { grid-row: 1 / 3; border-left:  1px solid var(--border); overflow-y: auto; }
 
-    /* ── HEADER ── */
-    header {
-      position: sticky; top: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 2rem;
-      height: 60px;
-      background: rgba(5,11,20,0.92);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-    }
+/* ===================== PANEL NAV (tabs) ===================== */
+.panel-tabs {
+  display: flex; gap: 2px;
+  padding: 8px 8px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 7px 4px 6px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: all .2s;
+}
+.tab-btn:hover { color: var(--text); background: var(--card); }
+.tab-btn.active {
+  color: var(--accent);
+  background: var(--card);
+  border-color: var(--border);
+  text-shadow: var(--glow);
+}
 
-    .logo {
-      display: flex; align-items: center; gap: 10px;
-      font-family: var(--sans); font-weight: 800; font-size: 1.1rem;
-      letter-spacing: 0.05em; color: #fff;
-    }
-    .logo-icon {
-      width: 30px; height: 30px;
-      background: var(--accent);
-      clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
-      display: flex; align-items: center; justify-content: center;
-    }
-    .logo span { color: var(--accent); }
+/* ===================== PANEL CONTENT ===================== */
+.panel { display: none; padding: 12px; flex-direction: column; gap: 10px; }
+.panel.active { display: flex; }
 
-    .header-status {
-      display: flex; align-items: center; gap: 1.5rem;
-    }
+/* ===================== SECTION HEADERS ===================== */
+.section-hdr {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
 
-    .ws-badge {
-      display: flex; align-items: center; gap: 6px;
-      font-family: var(--mono); font-size: 0.7rem;
-      color: var(--muted);
-    }
-    .ws-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--muted);
-      transition: background 0.3s;
-    }
-    .ws-dot.live { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); animation: pulse 2s infinite; }
-    .ws-dot.error { background: var(--danger); }
+/* ===================== VESSELS LIST ===================== */
+.vessel-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+  position: relative;
+}
+.vessel-card:hover { border-color: var(--accent); box-shadow: var(--glow); }
+.vessel-card.selected { border-color: var(--accent2); box-shadow: var(--glow2); }
+.vc-name { font-family: var(--font-ui); font-size: 15px; font-weight: 700; color: #fff; }
+.vc-mmsi { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.vc-row { display: flex; justify-content: space-between; margin-top: 6px; }
+.vc-stat { text-align: center; }
+.vc-stat .val { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.vc-stat .lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  position: absolute; top: 8px; right: 8px;
+}
+.badge-active  { background: rgba(0,255,157,.15); color: var(--accent2); border: 1px solid rgba(0,255,157,.3); }
+.badge-anchor  { background: rgba(255,170,0,.15);  color: var(--warn);    border: 1px solid rgba(255,170,0,.3); }
+.badge-dark    { background: rgba(255,64,96,.15);  color: var(--danger);  border: 1px solid rgba(255,64,96,.3); }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
-    }
+/* ===================== MAP ===================== */
+#map { flex: 1; }
+#map .leaflet-container { background: #040810 !important; }
 
-    .clock {
-      font-family: var(--mono); font-size: 0.75rem; color: var(--accent);
-    }
+/* ===================== KPI ROW ===================== */
+.kpi-row {
+  display: flex; gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.kpi {
+  flex: 1; text-align: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 4px;
+}
+.kpi .k-val { font-family: var(--font-mono); font-size: 20px; color: var(--accent); }
+.kpi .k-lbl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
 
-    /* ── MAIN LAYOUT ── */
-    main {
-      position: relative; z-index: 1;
-      display: grid;
-      grid-template-columns: 300px 1fr 280px;
-      grid-template-rows: auto 1fr;
-      gap: 1px;
-      flex: 1;
-      background: var(--border);
-    }
+/* ===================== INFO CARDS (right panel) ===================== */
+.info-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.info-card h4 {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 700;
+  letter-spacing: 1px; color: #fff; margin-bottom: 8px;
+}
+.row-kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.row-kv:last-child { border-bottom: none; }
+.row-kv .k { color: var(--text-dim); font-size: 11px; }
+.row-kv .v { font-family: var(--font-mono); font-size: 11px; color: var(--text); }
+.v.accent { color: var(--accent); }
+.v.green  { color: var(--accent2); }
+.v.warn   { color: var(--warn); }
+.v.danger { color: var(--danger); }
 
-    /* ── PANELS ── */
-    .panel {
-      background: var(--surface);
-      padding: 1.25rem;
-      overflow-y: auto;
-    }
+/* ===================== ANOMALY ITEMS ===================== */
+.anom-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  border-left: 3px solid var(--muted);
+}
+.anom-item.HIGH   { border-left-color: var(--danger); }
+.anom-item.MEDIUM { border-left-color: var(--warn); }
+.anom-item.LOW    { border-left-color: var(--accent); }
+.anom-icon { font-size: 20px; line-height: 1; }
+.anom-body { flex: 1; }
+.anom-body strong { font-family: var(--font-ui); font-size: 13px; color: #fff; }
+.anom-body p { font-size: 11px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+.anom-body .action { font-size: 10px; color: var(--warn); margin-top: 4px; }
+.anom-badge {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  padding: 2px 6px; border-radius: 10px; white-space: nowrap;
+}
+.anom-badge.HIGH   { background: rgba(255,64,96,.2);  color: var(--danger); }
+.anom-badge.MEDIUM { background: rgba(255,170,0,.2);  color: var(--warn); }
+.anom-badge.LOW    { background: rgba(0,212,255,.15); color: var(--accent); }
+.anom-badge.NONE   { background: rgba(0,255,157,.15); color: var(--accent2); }
 
-    .panel-title {
-      font-family: var(--mono); font-size: 0.65rem; font-weight: 700;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--accent); margin-bottom: 1rem;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .panel-title::before {
-      content: ''; display: block; width: 3px; height: 14px;
-      background: var(--accent); border-radius: 2px;
-    }
+/* ===================== SCHEDULE TABLE ===================== */
+.sched-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.sched-table th {
+  font-family: var(--font-ui); font-size: 10px; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--text-dim);
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.sched-table td { padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,.04); }
+.sched-table tr:hover td { background: rgba(0,212,255,.04); }
+.priority-HIGH   { color: var(--danger); font-weight: 700; }
+.priority-MEDIUM { color: var(--warn); }
+.priority-NORMAL { color: var(--accent2); }
 
-    /* ── KPI BAR ── */
-    .kpi-bar {
-      grid-column: 1 / -1;
-      background: var(--panel);
-      display: flex; align-items: stretch;
-      border-bottom: 1px solid var(--border);
-    }
+/* ===================== SAT PANEL ===================== */
+.sat-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.sat-stat {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; text-align: center;
+}
+.sat-stat .big { font-family: var(--font-mono); font-size: 24px; color: var(--accent); }
+.sat-stat .sub { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+.sat-orbit {
+  background: radial-gradient(ellipse at 50% 60%, rgba(0,212,255,.06) 0%, transparent 70%);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; text-align: center; position: relative;
+}
+.sat-orbit canvas { width: 100%; max-width: 240px; }
+.signal-bar {
+  height: 6px; border-radius: 3px; margin-top: 4px;
+  background: linear-gradient(90deg, var(--danger) 0%, var(--warn) 40%, var(--accent2) 75%, var(--accent) 100%);
+}
 
-    .kpi-item {
-      flex: 1;
-      padding: 0.85rem 1.5rem;
-      border-right: 1px solid var(--border);
-      display: flex; flex-direction: column; gap: 4px;
-    }
-    .kpi-item:last-child { border-right: none; }
+/* ===================== ETA PROGRESS BARS ===================== */
+.eta-item {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+}
+.eta-item-top { display: flex; justify-content: space-between; align-items: baseline; }
+.eta-name { font-family: var(--font-ui); font-size: 14px; font-weight: 700; color: #fff; }
+.eta-time { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.eta-bar-wrap { margin-top: 6px; background: var(--surface); border-radius: 3px; height: 5px; }
+.eta-bar-fill { height: 100%; border-radius: 3px; transition: width 1s; }
+.eta-meta { display: flex; justify-content: space-between; margin-top: 4px; font-size: 10px; color: var(--text-dim); }
 
-    .kpi-label {
-      font-family: var(--mono); font-size: 0.6rem;
-      letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
-    }
-    .kpi-value {
-      font-family: var(--mono); font-size: 1.5rem; font-weight: 700;
-      color: #fff; line-height: 1;
-    }
-    .kpi-sub {
-      font-family: var(--mono); font-size: 0.65rem; color: var(--accent2);
-    }
+/* ===================== WEATHER BANNER ===================== */
+.weather-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.weather-banner.stormy { border-color: var(--danger); background: rgba(255,64,96,.08); }
+.weather-banner.warn   { border-color: var(--warn);   background: rgba(255,170,0,.08); }
+.weather-banner .wicon { font-size: 24px; }
+.weather-banner .wtext strong { font-family: var(--font-ui); font-size: 14px; color: #fff; display: block; }
+.weather-banner .wtext small  { font-size: 10px; color: var(--text-dim); }
 
-    /* ── MAP ── */
-    #map-panel {
-      background: var(--bg);
-      position: relative; overflow: hidden;
-      display: flex; flex-direction: column;
-    }
+/* ===================== BUTTONS ===================== */
+.btn {
+  font-family: var(--font-ui); font-size: 12px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase;
+  padding: 8px 16px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: transparent;
+  color: var(--accent); cursor: pointer; transition: all .2s;
+}
+.btn:hover { background: var(--accent); color: var(--bg); box-shadow: var(--glow); }
+.btn-green { border-color: var(--accent2); color: var(--accent2); }
+.btn-green:hover { background: var(--accent2); color: var(--bg); box-shadow: var(--glow2); }
+.btn-sm { padding: 4px 10px; font-size: 10px; }
 
-    #caspian-map {
-      flex: 1;
-      position: relative;
-      background:
-        radial-gradient(ellipse 70% 90% at 50% 50%, #0a2a4a 0%, #050b14 100%);
-    }
+/* ===================== SCROLLBAR ===================== */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-    #map-svg {
-      width: 100%; height: 100%;
-      cursor: crosshair;
-    }
+/* ===================== LOADING SPINNER ===================== */
+.spinner {
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  width: 20px; height: 20px;
+  animation: spin .8s linear infinite;
+  margin: 0 auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-row { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; padding: 8px; }
 
-    .vessel-dot {
-      cursor: pointer;
-      transition: r 0.2s;
-    }
-    .vessel-dot:hover { filter: brightness(1.5); }
-
-    .vessel-label {
-      font-family: var(--mono); font-size: 9px; fill: rgba(200,223,240,0.7);
-      pointer-events: none;
-    }
-
-    .port-marker {
-      fill: var(--accent2);
-      filter: drop-shadow(0 0 4px var(--accent2));
-    }
-
-    /* ── VESSEL LIST ── */
-    .vessel-list {
-      display: flex; flex-direction: column; gap: 6px;
-    }
-
-    .vessel-card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.75rem;
-      cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
-      position: relative; overflow: hidden;
-    }
-    .vessel-card::before {
-      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-      width: 3px; background: var(--accent);
-      transform: scaleY(0); transition: transform 0.2s;
-    }
-    .vessel-card:hover { border-color: var(--accent); background: rgba(0,180,255,0.06); }
-    .vessel-card:hover::before { transform: scaleY(1); }
-    .vessel-card.selected { border-color: var(--accent); background: rgba(0,180,255,0.08); }
-    .vessel-card.selected::before { transform: scaleY(1); }
-
-    .vessel-card.alert-high::before { background: var(--danger); }
-    .vessel-card.alert-high { border-color: rgba(255,77,109,0.3); }
-
-    .vc-header {
-      display: flex; justify-content: space-between; align-items: flex-start;
-      margin-bottom: 6px;
-    }
-    .vc-name {
-      font-weight: 600; font-size: 0.82rem; color: #e8f4ff; line-height: 1.2;
-    }
-    .vc-flag { font-size: 0.85rem; }
-    .vc-mmsi {
-      font-family: var(--mono); font-size: 0.6rem; color: var(--muted);
-      margin-bottom: 6px;
-    }
-    .vc-row {
-      display: flex; gap: 12px;
-    }
-    .vc-stat {
-      font-family: var(--mono); font-size: 0.65rem;
-    }
-    .vc-stat .v { color: #fff; }
-    .vc-stat .k { color: var(--muted); }
-
-    .status-badge {
-      display: inline-block; padding: 1px 6px; border-radius: 2px;
-      font-family: var(--mono); font-size: 0.6rem; font-weight: 700;
-      text-transform: uppercase;
-    }
-    .status-badge.active { background: rgba(0,229,170,0.15); color: var(--accent2); }
-    .status-badge.anchored { background: rgba(255,170,0,0.15); color: var(--warn); }
-    .status-badge.docked { background: rgba(0,180,255,0.15); color: var(--accent); }
-
-    /* ── RIGHT PANEL ── */
-    .alerts-list {
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .alert-item {
-      background: var(--panel);
-      border-left: 3px solid var(--warn);
-      border-radius: 0 4px 4px 0;
-      padding: 0.65rem 0.75rem;
-      font-size: 0.75rem;
-    }
-    .alert-item.high { border-color: var(--danger); }
-    .alert-item.low { border-color: var(--accent); }
-    .alert-time {
-      font-family: var(--mono); font-size: 0.58rem; color: var(--muted);
-      margin-bottom: 3px;
-    }
-    .alert-msg { color: var(--text); line-height: 1.4; }
-    .alert-vessel {
-      font-family: var(--mono); font-size: 0.6rem; color: var(--accent);
-      margin-top: 4px;
-    }
-
-    /* ── DETAIL PANEL (bottom of map) ── */
-    #detail-bar {
-      background: var(--panel);
-      border-top: 1px solid var(--border);
-      padding: 0.85rem 1.25rem;
-      display: none;
-      gap: 2rem;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    #detail-bar.visible { display: flex; }
-
-    .detail-name {
-      font-weight: 800; font-size: 1rem; color: #fff;
-    }
-    .detail-stat {
-      font-family: var(--mono); font-size: 0.68rem;
-    }
-    .detail-stat .k { color: var(--muted); margin-right: 4px; }
-    .detail-stat .v { color: var(--accent); font-weight: 700; }
-
-    .eta-bar {
-      flex: 1; min-width: 180px;
-      background: rgba(0,180,255,0.08);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.5rem 0.75rem;
-    }
-    .eta-label { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); }
-    .eta-value { font-family: var(--mono); font-size: 0.85rem; color: var(--accent2); font-weight: 700; }
-    .eta-conf { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); }
-
-    .conf-bar-wrap {
-      width: 100px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; margin-top: 4px;
-    }
-    .conf-bar-fill { height: 100%; border-radius: 2px; background: var(--accent2); transition: width 0.5s; }
-
-    /* ── PORT SUMMARY CARD ── */
-    .port-card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.85rem;
-      margin-bottom: 1rem;
-    }
-    .port-metric {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 5px 0;
-      border-bottom: 1px solid var(--border);
-      font-family: var(--mono); font-size: 0.7rem;
-    }
-    .port-metric:last-child { border-bottom: none; }
-    .pm-k { color: var(--muted); }
-    .pm-v { color: #fff; font-weight: 700; }
-
-    /* ── SEARCH ── */
-    .search-wrap {
-      position: relative; margin-bottom: 1rem;
-    }
-    .search-input {
-      width: 100%;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      padding: 0.5rem 0.75rem 0.5rem 2rem;
-      font-family: var(--mono); font-size: 0.75rem; color: var(--text);
-      outline: none; transition: border-color 0.2s;
-    }
-    .search-input:focus { border-color: var(--accent); }
-    .search-input::placeholder { color: var(--muted); }
-    .search-icon {
-      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-      color: var(--muted); font-size: 0.7rem;
-    }
-
-    /* ── LOADER ── */
-    .loader {
-      display: flex; align-items: center; justify-content: center;
-      flex-direction: column; gap: 12px;
-      padding: 2rem; color: var(--muted);
-      font-family: var(--mono); font-size: 0.7rem;
-    }
-    .loader-ring {
-      width: 30px; height: 30px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── SCROLLBAR ── */
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    /* ── Responsive ── */
-    @media (max-width: 900px) {
-      main { grid-template-columns: 1fr; grid-template-rows: auto; }
-      .kpi-bar { flex-wrap: wrap; }
-      #map-panel { min-height: 300px; }
-    }
-  </style>
+/* ===================== CLOCK ===================== */
+#clock { font-family: var(--font-mono); font-size: 12px; color: var(--accent2); }
+</style>
 </head>
 <body>
 
-<!-- ══ HEADER ══ -->
+<!-- ═══════════════════════════════ HEADER ═══════════════════════════════ -->
 <header>
-  <div class="logo">
-    <div class="logo-icon"></div>
-    AZCON · <span>CASPIAN</span>
-  </div>
-  <div class="header-status">
-    <div class="ws-badge">
-      <div class="ws-dot" id="ws-dot"></div>
-      <span id="ws-status">QOŞULUR...</span>
-    </div>
-    <div class="clock" id="clock">--:--:-- UTC</div>
+  <div class="logo">AZ<span>CON</span> · Caspian Corridor</div>
+  <div class="header-meta">
+    <span><span class="live-dot"></span>CANLI</span>
+    <span id="clock">--:--:--</span>
+    <span id="ws-status" style="color:var(--warn)">WS QOŞULUR...</span>
   </div>
 </header>
 
-<!-- ══ MAIN GRID ══ -->
-<main>
+<!-- ═══════════════════════════════ APP GRID ═══════════════════════════════ -->
+<div class="app">
 
-  <!-- KPI BAR -->
-  <div class="kpi-bar">
-    <div class="kpi-item">
-      <div class="kpi-label">Aktiv Gəmilər</div>
-      <div class="kpi-value" id="kpi-active">—</div>
-      <div class="kpi-sub">real vaxt</div>
+  <!-- ──────── LEFT SIDEBAR: Vessel List ──────── -->
+  <aside class="sidebar-left">
+    <div class="section-hdr" style="margin:12px 12px 8px">
+      GƏMİ FLOTİLLASI
     </div>
-    <div class="kpi-item">
-      <div class="kpi-label">Bu gün gəliş</div>
-      <div class="kpi-value" id="kpi-arrivals">—</div>
-      <div class="kpi-sub">Bakı limanı</div>
+    <div id="vessel-list" style="padding:0 8px 12px;display:flex;flex-direction:column;gap:6px">
+      <div class="loading-row"><div class="spinner"></div> Yüklənir...</div>
     </div>
-    <div class="kpi-item">
-      <div class="kpi-label">Ümumi Yük</div>
-      <div class="kpi-value" id="kpi-cargo">—</div>
-      <div class="kpi-sub">ton</div>
-    </div>
-    <div class="kpi-item">
-      <div class="kpi-label">Vaqon Tələbi</div>
-      <div class="kpi-value" id="kpi-wagons">—</div>
-      <div class="kpi-sub">bu gün</div>
-    </div>
-    <div class="kpi-item">
-      <div class="kpi-label">Aktiv Xəbərdarlıq</div>
-      <div class="kpi-value" id="kpi-alerts" style="color:var(--warn)">—</div>
-      <div class="kpi-sub">həll edilməmiş</div>
-    </div>
-  </div>
+  </aside>
 
-  <!-- LEFT: Vessel List -->
-  <div class="panel" style="grid-row: 2;">
-    <div class="panel-title">Gəmi Siyahısı</div>
-    <div class="search-wrap">
-      <span class="search-icon">⌕</span>
-      <input class="search-input" id="vessel-search" type="text" placeholder="Ad və ya MMSI axtar..." />
+  <!-- ──────── CENTER: Map + KPIs ──────── -->
+  <main class="main-center">
+    <!-- KPI Row -->
+    <div class="kpi-row" id="kpi-row">
+      <div class="kpi"><div class="k-val" id="kpi-vessels">—</div><div class="k-lbl">Aktiv Gəmi</div></div>
+      <div class="kpi"><div class="k-val" id="kpi-cargo">—</div><div class="k-lbl">Yük (ton)</div></div>
+      <div class="kpi"><div class="k-val" id="kpi-wagons">—</div><div class="k-lbl">Vaqon</div></div>
+      <div class="kpi"><div class="k-val" id="kpi-alerts">—</div><div class="k-lbl">Anomaliya</div></div>
     </div>
-    <div id="vessel-list" class="vessel-list">
-      <div class="loader"><div class="loader-ring"></div>YÜKLƏNİR...</div>
-    </div>
-  </div>
+    <!-- Map -->
+    <div id="map"></div>
+  </main>
 
-  <!-- CENTER: Map -->
-  <div id="map-panel" style="grid-row: 2; display: flex; flex-direction: column;">
-    <div id="caspian-map">
-      <svg id="map-svg" viewBox="0 0 600 650" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="seaGrad" cx="50%" cy="50%" r="60%">
-            <stop offset="0%" stop-color="#0d2a45"/>
-            <stop offset="100%" stop-color="#050b14"/>
-          </radialGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <filter id="softglow">
-            <feGaussianBlur stdDeviation="6" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <!-- Sea background -->
-        <rect width="600" height="650" fill="url(#seaGrad)"/>
-        <!-- Grid lines -->
-        <g stroke="rgba(0,180,255,0.05)" stroke-width="1">
-          <line x1="0" y1="130" x2="600" y2="130"/>
-          <line x1="0" y1="260" x2="600" y2="260"/>
-          <line x1="0" y1="390" x2="600" y2="390"/>
-          <line x1="0" y1="520" x2="600" y2="520"/>
-          <line x1="150" y1="0" x2="150" y2="650"/>
-          <line x1="300" y1="0" x2="300" y2="650"/>
-          <line x1="450" y1="0" x2="450" y2="650"/>
-        </g>
-        <!-- Caspian Sea coastline (simplified) -->
-        <path d="M200,30 C220,25 260,20 290,35 C320,50 340,70 355,100
-                 C370,130 375,160 380,195 C385,230 382,265 378,300
-                 C374,335 368,365 362,395 C350,440 330,475 310,510
-                 C290,545 265,575 240,595 C215,615 185,625 160,620
-                 C135,615 115,600 100,580 C85,560 75,535 70,505
-                 C65,475 68,445 72,415 C76,385 82,355 85,320
-                 C88,285 86,250 88,215 C90,180 95,148 108,118
-                 C121,88 140,60 160,42 C175,30 190,32 200,30Z"
-              fill="rgba(10,42,74,0.5)" stroke="rgba(0,180,255,0.18)" stroke-width="1.5"/>
-        <!-- Port: Baku -->
-        <circle cx="310" cy="220" r="7" fill="var(--accent2)" filter="url(#softglow)" opacity="0.9"/>
-        <text x="320" y="218" font-family="Space Mono, monospace" font-size="9" fill="var(--accent2)" opacity="0.9">BAKI LİMANI</text>
-        <!-- Port: Aktau -->
-        <circle cx="88" cy="265" r="5" fill="var(--accent)" filter="url(#glow)" opacity="0.7"/>
-        <text x="98" y="268" font-family="Space Mono, monospace" font-size="8" fill="var(--accent)" opacity="0.7">AKTAU</text>
-        <!-- Port: Turkmenbashi -->
-        <circle cx="92" cy="390" r="5" fill="var(--accent)" filter="url(#glow)" opacity="0.7"/>
-        <text x="102" y="393" font-family="Space Mono, monospace" font-size="8" fill="var(--accent)" opacity="0.7">TÜRKM.</text>
-        <!-- Port: Anzali -->
-        <circle cx="295" cy="520" r="5" fill="var(--accent)" filter="url(#glow)" opacity="0.7"/>
-        <text x="305" y="523" font-family="Space Mono, monospace" font-size="8" fill="var(--accent)" opacity="0.7">ANZALI</text>
-        <!-- Vessel layer -->
-        <g id="vessel-layer"></g>
-        <!-- Route lines layer -->
-        <g id="route-layer" opacity="0.3"></g>
-      </svg>
+  <!-- ──────── RIGHT SIDEBAR: Panels ──────── -->
+  <aside class="sidebar-right">
+    <!-- TABS -->
+    <div class="panel-tabs">
+      <button class="tab-btn active" onclick="showTab('vessel')">Gəmi</button>
+      <button class="tab-btn" onclick="showTab('reschedule')">Plan</button>
+      <button class="tab-btn" onclick="showTab('anomaly')">Anomaliya</button>
+      <button class="tab-btn" onclick="showTab('eta')">ETA</button>
+      <button class="tab-btn" onclick="showTab('satellite')">Peyk</button>
     </div>
-    <!-- Detail bar -->
-    <div id="detail-bar">
-      <div>
-        <div class="detail-name" id="detail-name">—</div>
-        <div style="font-family:var(--mono);font-size:0.6rem;color:var(--muted)" id="detail-mmsi">MMSI: —</div>
+
+    <!-- PANEL: Vessel Info -->
+    <div id="panel-vessel" class="panel active" style="padding:12px">
+      <div id="vessel-detail">
+        <div style="text-align:center;color:var(--text-dim);padding:40px 0;font-size:12px">
+          Məlumat üçün sol siyahıdan gəmi seçin
+        </div>
       </div>
-      <div class="detail-stat"><span class="k">TİP</span><span class="v" id="detail-type">—</span></div>
-      <div class="detail-stat"><span class="k">BAYRAق</span><span class="v" id="detail-flag">—</span></div>
-      <div class="detail-stat"><span class="k">SÜRƏт</span><span class="v" id="detail-speed">—</span></div>
-      <div class="detail-stat"><span class="k">KURSusu</span><span class="v" id="detail-course">—</span></div>
-      <div class="detail-stat"><span class="k">YÜK</span><span class="v" id="detail-cargo">—</span></div>
-      <div class="eta-bar">
-        <div class="eta-label">TƏXMİNİ GƏLİŞ (ETA)</div>
-        <div class="eta-value" id="detail-eta">—</div>
-        <div class="eta-conf">Etibar: <span id="detail-conf">—</span></div>
-        <div class="conf-bar-wrap"><div class="conf-bar-fill" id="conf-fill" style="width:0%"></div></div>
+    </div>
+
+    <!-- PANEL: Dynamic Rescheduling -->
+    <div id="panel-reschedule" class="panel" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="section-hdr" style="margin:0">DİNAMİK YENİDƏN PLANLAŞDIRMA</div>
+        <button class="btn btn-sm" onclick="loadReschedule()">Yenilə</button>
       </div>
-      <div class="detail-stat"><span class="k">MƏSAFə</span><span class="v" id="detail-dist">—</span></div>
-    </div>
-  </div>
-
-  <!-- RIGHT: Alerts + Port Summary -->
-  <div class="panel" style="grid-row: 2;">
-    <div class="panel-title">Liman Xülasəsi</div>
-    <div class="port-card" id="port-card">
-      <div class="loader"><div class="loader-ring"></div></div>
+      <div id="weather-banner"></div>
+      <div id="reschedule-summary"></div>
+      <div id="reschedule-table" style="overflow-x:auto"></div>
     </div>
 
-    <div class="panel-title" style="margin-top:1rem;">Xəbərdarlıqlar</div>
-    <div id="alert-list" class="alerts-list">
-      <div class="loader"><div class="loader-ring"></div>YÜKLƏNİR...</div>
+    <!-- PANEL: Anomaly Detection -->
+    <div id="panel-anomaly" class="panel" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="section-hdr" style="margin:0">ANOMALİYA AŞKARLAMA</div>
+        <button class="btn btn-sm" onclick="loadAnomalies()">Yenilə</button>
+      </div>
+      <div id="anomaly-summary"></div>
+      <div id="anomaly-list" style="display:flex;flex-direction:column;gap:6px"></div>
     </div>
-  </div>
 
-</main>
+    <!-- PANEL: ETA Forecast -->
+    <div id="panel-eta" class="panel" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="section-hdr" style="margin:0">ETA PROQNOZU</div>
+        <button class="btn btn-sm" onclick="loadETA()">Yenilə</button>
+      </div>
+      <div id="eta-weather"></div>
+      <div id="eta-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
 
+    <!-- PANEL: Azersky Satellite -->
+    <div id="panel-satellite" class="panel" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="section-hdr" style="margin:0">AZERSKY PEYK SİSTEMİ</div>
+        <button class="btn btn-sm btn-green" onclick="loadSatellite()">Yenilə</button>
+      </div>
+      <div id="sat-content"></div>
+    </div>
+
+  </aside>
+</div><!-- /.app -->
+
+<!-- ═══════════════════════════════ SCRIPTS ═══════════════════════════════ -->
 <script>
-// ════════════════════════════════════════════
-//  CONFIG
-// ════════════════════════════════════════════
-const API_BASE = window.location.origin;
-const WS_URL   = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/vessels`;
+/* ── Config ── */
+const API = '';   // same origin; change to http://... for external
+const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/vessels`;
 
-// Caspian bounding box → SVG coordinate mapping
-// Lon: 49.5 (west) … 54.5 (east) → x: 60 … 540
-// Lat: 36.5 (south) … 47.5 (north) → y: 620 … 30
-const MAP = {
-  lonMin: 49.0, lonMax: 55.0,
-  latMin: 36.0, latMax: 47.5,
-  svgX1: 60, svgX2: 540,
-  svgY1: 30, svgY2: 630,
-};
-function toSVG(lon, lat) {
-  const x = MAP.svgX1 + (lon - MAP.lonMin) / (MAP.lonMax - MAP.lonMin) * (MAP.svgX2 - MAP.svgX1);
-  const y = MAP.svgY2 - (lat - MAP.latMin) / (MAP.latMax - MAP.latMin) * (MAP.svgY2 - MAP.svgY1);
-  return { x, y };
+/* ── State ── */
+let vessels = {};
+let markers = {};
+let selectedMMSI = null;
+let map, vesselLayer;
+
+/* ── Clock ── */
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toUTCString().slice(17,25) + ' UTC';
+}, 1000);
+
+/* ══════════════════ MAP INIT ══════════════════ */
+function initMap() {
+  map = L.map('map', { center: [41.5, 51.0], zoom: 6, zoomControl: false });
+  L.control.zoom({ position: 'topright' }).addTo(map);
+
+  // Dark CartoDB basemap
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© CartoDB', maxZoom: 18
+  }).addTo(map);
+
+  // Bakı limanı marker
+  L.circleMarker([40.342, 49.865], {
+    radius: 10, color: '#00d4ff', fillColor: '#00d4ff',
+    fillOpacity: 0.25, weight: 2
+  }).addTo(map).bindTooltip('🏭 Bakı Limanı', { permanent: false });
+
+  vesselLayer = L.layerGroup().addTo(map);
 }
 
-// ════════════════════════════════════════════
-//  STATE
-// ════════════════════════════════════════════
-let vessels    = [];
-let alerts     = [];
-let portData   = null;
-let selected   = null;
-let ws         = null;
-let wsRetries  = 0;
-
-// ════════════════════════════════════════════
-//  CLOCK
-// ════════════════════════════════════════════
-function updateClock() {
-  const now = new Date();
-  const hh = String(now.getUTCHours()).padStart(2,'0');
-  const mm = String(now.getUTCMinutes()).padStart(2,'0');
-  const ss = String(now.getUTCSeconds()).padStart(2,'0');
-  document.getElementById('clock').textContent = `${hh}:${mm}:${ss} UTC`;
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// ════════════════════════════════════════════
-//  FETCH HELPERS
-// ════════════════════════════════════════════
-async function apiFetch(path) {
-  try {
-    const r = await fetch(API_BASE + path);
-    if (!r.ok) throw new Error(r.status);
-    return await r.json();
-  } catch(e) {
-    console.warn('API fetch failed:', path, e);
-    return null;
-  }
-}
-
-// ════════════════════════════════════════════
-//  INITIAL DATA LOAD
-// ════════════════════════════════════════════
-async function loadAll() {
-  const [v, a, p] = await Promise.all([
-    apiFetch('/vessels'),
-    apiFetch('/alerts'),
-    apiFetch('/port/summary'),
-  ]);
-  if (v) { vessels = v; renderVesselList(); renderMap(); updateKPIs(); }
-  if (a) { alerts = a;  renderAlerts(); }
-  if (p) { portData = p; renderPortCard(); }
-}
-
-// ════════════════════════════════════════════
-//  KPI
-// ════════════════════════════════════════════
-function updateKPIs() {
-  const active = vessels.filter(v => v.status === 'active').length;
-  document.getElementById('kpi-active').textContent = active;
-  if (portData) {
-    document.getElementById('kpi-arrivals').textContent = portData.arrivals_today;
-    document.getElementById('kpi-cargo').textContent    = portData.total_cargo_tons.toLocaleString();
-    document.getElementById('kpi-wagons').textContent   = portData.wagons_needed;
-  }
-  document.getElementById('kpi-alerts').textContent = alerts.filter(a => !a.resolved).length || alerts.length;
-}
-
-// ════════════════════════════════════════════
-//  VESSEL LIST
-// ════════════════════════════════════════════
-function renderVesselList(filter = '') {
-  const list = document.getElementById('vessel-list');
-  const q = filter.toLowerCase();
-  const shown = vessels.filter(v =>
-    !q || v.name.toLowerCase().includes(q) || v.mmsi.includes(q)
-  );
-
-  if (!shown.length) {
-    list.innerHTML = `<div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);padding:1rem;text-align:center">Nəticə tapılmadı</div>`;
-    return;
-  }
-
-  list.innerHTML = shown.map(v => {
-    const hasAlert = alerts.some(a => a.vessel_mmsi === v.mmsi && a.severity === 'high');
-    return `
-    <div class="vessel-card ${selected === v.mmsi ? 'selected' : ''} ${hasAlert ? 'alert-high' : ''}"
-         data-mmsi="${v.mmsi}" onclick="selectVessel('${v.mmsi}')">
-      <div class="vc-header">
-        <div class="vc-name">${v.name}</div>
-        <div class="vc-flag">${flagEmoji(v.flag)}</div>
-      </div>
-      <div class="vc-mmsi">MMSI: ${v.mmsi}</div>
-      <div class="vc-row">
-        <span class="vc-stat"><span class="k">TİP </span><span class="v">${v.vessel_type}</span></span>
-        <span class="vc-stat"><span class="k">SÜR </span><span class="v">${v.speed_knots}kn</span></span>
-        <span class="vc-stat"><span class="k">YÜK </span><span class="v">${v.cargo_tons}t</span></span>
-      </div>
-      <div style="margin-top:6px">
-        <span class="status-badge ${v.status}">${statusLabel(v.status)}</span>
-        ${hasAlert ? '<span class="status-badge" style="background:rgba(255,77,109,0.15);color:var(--danger);margin-left:4px">⚠ XƏBƏRDARLIQ</span>' : ''}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-document.getElementById('vessel-search').addEventListener('input', e => {
-  renderVesselList(e.target.value);
-});
-
-function flagEmoji(code) {
-  if (!code || code.length !== 2) return '🏳';
-  return String.fromCodePoint(
-    ...[...code.toUpperCase()].map(c => 127397 + c.charCodeAt(0))
-  );
-}
-
-function statusLabel(s) {
-  const m = { active: 'AKTİV', anchored: 'LƏNGƏRDƏ', docked: 'LIMANDA' };
-  return m[s] || s;
-}
-
-// ════════════════════════════════════════════
-//  MAP
-// ════════════════════════════════════════════
-function renderMap() {
-  const layer  = document.getElementById('vessel-layer');
-  const routes = document.getElementById('route-layer');
-  layer.innerHTML  = '';
-  routes.innerHTML = '';
-
-  const baku = toSVG(49.865, 40.342);
-
-  vessels.forEach(v => {
-    const { x, y } = toSVG(v.lon, v.lat);
-    const isSelected = selected === v.mmsi;
-    const hasAlert = alerts.some(a => a.vessel_mmsi === v.mmsi && a.severity === 'high');
-    const color = hasAlert ? 'var(--danger)' : (v.status === 'active' ? 'var(--accent)' : 'var(--warn)');
-
-    // Route line to Baku
-    if (v.destination === 'Bakı Limanı' || v.status === 'active') {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', x); line.setAttribute('y1', y);
-      line.setAttribute('x2', baku.x); line.setAttribute('y2', baku.y);
-      line.setAttribute('stroke', color);
-      line.setAttribute('stroke-width', '0.5');
-      line.setAttribute('stroke-dasharray', '4 4');
-      routes.appendChild(line);
-    }
-
-    // Vessel dot
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'vessel-dot');
-    g.setAttribute('data-mmsi', v.mmsi);
-    g.setAttribute('transform', `translate(${x},${y})`);
-    g.addEventListener('click', () => selectVessel(v.mmsi));
-
-    // Glow ring for selected
-    if (isSelected) {
-      const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      ring.setAttribute('r', '12');
-      ring.setAttribute('fill', 'none');
-      ring.setAttribute('stroke', color);
-      ring.setAttribute('stroke-width', '1');
-      ring.setAttribute('opacity', '0.4');
-      g.appendChild(ring);
-    }
-
-    // Ship shape (triangle pointing in course direction)
-    const course = (v.course_deg || 0);
-    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    poly.setAttribute('points', '0,-6 4,5 -4,5');
-    poly.setAttribute('fill', color);
-    poly.setAttribute('transform', `rotate(${course})`);
-    poly.setAttribute('filter', 'url(#glow)');
-    g.appendChild(poly);
-
-    // Label
-    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    txt.setAttribute('x', '8'); txt.setAttribute('y', '4');
-    txt.setAttribute('class', 'vessel-label');
-    txt.textContent = v.name.length > 10 ? v.name.slice(0,9)+'…' : v.name;
-    g.appendChild(txt);
-
-    layer.appendChild(g);
+/* ── Vessel icons ── */
+function vesselIcon(v) {
+  const col = v.status === 'active' ? '#00ff9d' :
+              v.status === 'dark'   ? '#ff4060' : '#ffaa00';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="28" viewBox="0 0 22 28">
+    <polygon points="11,2 20,24 11,19 2,24" fill="${col}" fill-opacity=".9"
+      stroke="#000" stroke-width="1"
+      transform="rotate(${v.course_deg||0},11,14)"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg, className: '', iconSize: [22,28], iconAnchor: [11,14]
   });
 }
 
-// ════════════════════════════════════════════
-//  SELECT VESSEL
-// ════════════════════════════════════════════
-async function selectVessel(mmsi) {
-  selected = mmsi;
-  renderVesselList(document.getElementById('vessel-search').value);
-  renderMap();
+/* ══════════════════ VESSEL LIST ══════════════════ */
+function renderVesselList() {
+  const el = document.getElementById('vessel-list');
+  const list = Object.values(vessels);
+  if (!list.length) { el.innerHTML = '<div style="color:var(--text-dim);padding:8px">Gəmi yoxdur</div>'; return; }
 
-  const v = vessels.find(v => v.mmsi === mmsi);
+  el.innerHTML = list.map(v => `
+    <div class="vessel-card ${v.mmsi===selectedMMSI?'selected':''}" onclick="selectVessel('${v.mmsi}')">
+      <span class="badge badge-${v.status}">${v.status}</span>
+      <div class="vc-name">${v.name||v.mmsi}</div>
+      <div class="vc-mmsi">MMSI: ${v.mmsi} · ${v.flag||'—'}</div>
+      <div class="vc-row">
+        <div class="vc-stat"><div class="val">${(v.speed_knots||0).toFixed(1)}</div><div class="lbl">Knot</div></div>
+        <div class="vc-stat"><div class="val">${(v.cargo_tons||0).toFixed(0)}</div><div class="lbl">Ton</div></div>
+        <div class="vc-stat"><div class="val">${v.destination||'—'}</div><div class="lbl">Hədəf</div></div>
+      </div>
+    </div>`).join('');
+}
+
+/* ══════════════════ VESSEL SELECTION ══════════════════ */
+function selectVessel(mmsi) {
+  selectedMMSI = mmsi;
+  showTab('vessel');
+  renderVesselList();
+  const v = vessels[mmsi];
   if (!v) return;
+  if (markers[mmsi]) map.flyTo([v.lat, v.lon], 9);
 
-  document.getElementById('detail-bar').classList.add('visible');
-  document.getElementById('detail-name').textContent  = v.name;
-  document.getElementById('detail-mmsi').textContent  = `MMSI: ${v.mmsi}`;
-  document.getElementById('detail-type').textContent  = v.vessel_type;
-  document.getElementById('detail-flag').textContent  = `${flagEmoji(v.flag)} ${v.flag}`;
-  document.getElementById('detail-speed').textContent = `${v.speed_knots} kn`;
-  document.getElementById('detail-course').textContent= `${v.course_deg}°`;
-  document.getElementById('detail-cargo').textContent = `${v.cargo_tons} t`;
-  document.getElementById('detail-eta').textContent   = '...';
-  document.getElementById('detail-dist').textContent  = '...';
+  const eta = v.eta ? new Date(v.eta).toLocaleString('az', {hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}) : '—';
+  const conf = v.eta_confidence ? `${Math.round(v.eta_confidence*100)}%` : '—';
 
-  // Fetch ETA
-  const eta = await apiFetch(`/vessels/${mmsi}/eta`);
-  if (eta) {
-    const etaDt = new Date(eta.eta);
-    const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' };
-    document.getElementById('detail-eta').textContent  = etaDt.toLocaleString('az-AZ', opts) + ' UTC';
-    document.getElementById('detail-conf').textContent = `${Math.round(eta.confidence * 100)}%`;
-    document.getElementById('conf-fill').style.width   = `${eta.confidence * 100}%`;
-    document.getElementById('detail-dist').textContent = `${eta.distance_km} km`;
-  }
-}
-
-// ════════════════════════════════════════════
-//  ALERTS
-// ════════════════════════════════════════════
-function renderAlerts() {
-  const el = document.getElementById('alert-list');
-  if (!alerts.length) {
-    el.innerHTML = `<div style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);padding:1rem;text-align:center">Aktiv xəbərdarlıq yoxdur ✓</div>`;
-    return;
-  }
-  el.innerHTML = alerts.slice(0, 15).map(a => `
-    <div class="alert-item ${a.severity}">
-      <div class="alert-time">${new Date(a.created_at).toLocaleString('az-AZ',{timeZone:'UTC'})} UTC</div>
-      <div class="alert-msg">${a.message}</div>
-      <div class="alert-vessel">📡 ${a.vessel_mmsi} · ${a.alert_type}</div>
+  document.getElementById('vessel-detail').innerHTML = `
+    <div class="info-card">
+      <h4>${v.name||v.mmsi}</h4>
+      <div class="row-kv"><span class="k">MMSI</span><span class="v accent">${v.mmsi}</span></div>
+      <div class="row-kv"><span class="k">Növ</span><span class="v">${v.vessel_type||'—'}</span></div>
+      <div class="row-kv"><span class="k">Bayraq</span><span class="v">${v.flag||'—'}</span></div>
+      <div class="row-kv"><span class="k">Status</span><span class="v ${v.status==='active'?'green':v.status==='dark'?'danger':'warn'}">${v.status}</span></div>
     </div>
-  `).join('');
-}
-
-// ════════════════════════════════════════════
-//  PORT CARD
-// ════════════════════════════════════════════
-function renderPortCard() {
-  if (!portData) return;
-  const el = document.getElementById('port-card');
-  el.innerHTML = `
-    <div class="port-metric"><span class="pm-k">Bu gün gəliş</span><span class="pm-v">${portData.arrivals_today}</span></div>
-    <div class="port-metric"><span class="pm-k">Ümumi yük</span><span class="pm-v">${portData.total_cargo_tons.toLocaleString()} t</span></div>
-    <div class="port-metric"><span class="pm-k">Vaqon tələbi</span><span class="pm-v">${portData.wagons_needed}</span></div>
+    <div class="info-card">
+      <h4>Naviqasiya</h4>
+      <div class="row-kv"><span class="k">Sürət</span><span class="v accent">${(v.speed_knots||0).toFixed(1)} kt</span></div>
+      <div class="row-kv"><span class="k">Kurs</span><span class="v">${(v.course_deg||0).toFixed(0)}°</span></div>
+      <div class="row-kv"><span class="k">Koordinat</span><span class="v">${(v.lat||0).toFixed(4)}, ${(v.lon||0).toFixed(4)}</span></div>
+    </div>
+    <div class="info-card">
+      <h4>Yük & ETA</h4>
+      <div class="row-kv"><span class="k">Yük</span><span class="v accent">${(v.cargo_tons||0).toFixed(0)} ton</span></div>
+      <div class="row-kv"><span class="k">Hədəf</span><span class="v">${v.destination||'—'}</span></div>
+      <div class="row-kv"><span class="k">ETA</span><span class="v green">${eta}</span></div>
+      <div class="row-kv"><span class="k">Confidence</span><span class="v">${conf}</span></div>
+    </div>
+    <button class="btn" style="width:100%" onclick="fetchDetailedETA('${mmsi}')">AI ETA Hesabla</button>
+    <div id="ai-eta-result"></div>
   `;
+}
+
+async function fetchDetailedETA(mmsi) {
+  const el = document.getElementById('ai-eta-result');
+  el.innerHTML = '<div class="loading-row"><div class="spinner"></div> Hesablanır...</div>';
+  try {
+    const res = await fetch(`${API}/api/eta/${mmsi}`);
+    const d = await res.json();
+    const w = d.weather;
+    el.innerHTML = `
+      <div class="info-card" style="margin-top:0">
+        <h4>AI ETA Nəticəsi</h4>
+        <div class="row-kv"><span class="k">ETA</span><span class="v green">${d.eta_display}</span></div>
+        <div class="row-kv"><span class="k">Qalan vaxt</span><span class="v accent">${d.hours_remaining} saat</span></div>
+        <div class="row-kv"><span class="k">Məsafə</span><span class="v">${d.distance_km} km / ${d.distance_nm} nm</span></div>
+        <div class="row-kv"><span class="k">Effektiv sürət</span><span class="v">${d.effective_speed_knots} kt</span></div>
+        <div class="row-kv"><span class="k">Hava faktoru</span><span class="v ${d.weather_factor>1.1?'warn':''}">${d.weather_factor}×</span></div>
+        <div class="row-kv"><span class="k">Confidence</span><span class="v">${d.confidence_pct}</span></div>
+        <div class="row-kv"><span class="k">Hava</span><span class="v ${w.is_stormy?'danger':''}">${w.status}</span></div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--danger);font-size:11px;padding:4px">Xəta: ${e.message}</div>`;
+  }
+}
+
+/* ══════════════════ MAP MARKERS ══════════════════ */
+function updateMarkers() {
+  Object.values(vessels).forEach(v => {
+    if (!v.lat || !v.lon) return;
+    if (markers[v.mmsi]) {
+      markers[v.mmsi].setLatLng([v.lat, v.lon]).setIcon(vesselIcon(v));
+    } else {
+      markers[v.mmsi] = L.marker([v.lat, v.lon], { icon: vesselIcon(v) })
+        .addTo(vesselLayer)
+        .bindTooltip(`<b>${v.name||v.mmsi}</b><br>${(v.speed_knots||0).toFixed(1)} kt | ${v.status}`,
+          { direction: 'top', className: '' })
+        .on('click', () => selectVessel(v.mmsi));
+    }
+  });
   updateKPIs();
 }
 
-// ════════════════════════════════════════════
-//  WEBSOCKET
-// ════════════════════════════════════════════
-function connectWS() {
-  const dot    = document.getElementById('ws-dot');
-  const status = document.getElementById('ws-status');
+/* ══════════════════ KPIs ══════════════════ */
+function updateKPIs() {
+  const list = Object.values(vessels);
+  const active = list.filter(v => v.status === 'active');
+  const totalCargo = list.reduce((s, v) => s + (v.cargo_tons||0), 0);
+  const wagons = Math.ceil(totalCargo / 80);
+  document.getElementById('kpi-vessels').textContent = active.length;
+  document.getElementById('kpi-cargo').textContent = totalCargo.toFixed(0);
+  document.getElementById('kpi-wagons').textContent = wagons;
+  // anomaly count updated by loadAnomalies
+}
 
-  dot.className    = 'ws-dot';
-  status.textContent = 'QOŞULUR...';
-
-  ws = new WebSocket(WS_URL);
-
-  ws.onopen = () => {
-    dot.className = 'ws-dot live';
-    status.textContent = 'CANLI';
-    wsRetries = 0;
-  };
-
+/* ══════════════════ WEBSOCKET ══════════════════ */
+function initWS() {
+  const ws = new WebSocket(WS_URL);
+  const statusEl = document.getElementById('ws-status');
+  ws.onopen = () => { statusEl.textContent = 'WS AKTIV'; statusEl.style.color = 'var(--accent2)'; };
+  ws.onclose = () => { statusEl.textContent = 'WS KƏSİLDİ'; statusEl.style.color = 'var(--danger)'; setTimeout(initWS, 3000); };
+  ws.onerror = () => { statusEl.textContent = 'WS XƏTA'; statusEl.style.color = 'var(--danger)'; };
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-
-    if (msg.type === 'initial' && msg.vessels) {
-      vessels = msg.vessels;
-      renderVesselList(document.getElementById('vessel-search').value);
-      renderMap(); updateKPIs();
-    }
-
-    if (msg.vessels) {
-      msg.vessels.forEach(update => {
-        const idx = vessels.findIndex(v => v.mmsi === update.mmsi);
-        if (idx !== -1) {
-          vessels[idx] = { ...vessels[idx], ...update };
-        }
+    const data = JSON.parse(e.data);
+    if (data.type === 'initial') {
+      data.vessels.forEach(v => { vessels[v.mmsi] = { ...vessels[v.mmsi], ...v }; });
+      renderVesselList(); updateMarkers();
+    } else if (data.vessels) {
+      data.vessels.forEach(v => {
+        vessels[v.mmsi] = { ...vessels[v.mmsi], ...v };
       });
-      renderMap();
-      if (selected && vessels.find(v => v.mmsi === selected)) {
-        // live update detail speed
-        const v = vessels.find(v => v.mmsi === selected);
-        document.getElementById('detail-speed').textContent = `${v.speed_knots} kn`;
-      }
+      renderVesselList(); updateMarkers();
     }
-  };
-
-  ws.onclose = () => {
-    dot.className = 'ws-dot error';
-    wsRetries++;
-    const delay = Math.min(30000, 2000 * wsRetries);
-    status.textContent = `YENİDƏN QOŞULUR (${Math.round(delay/1000)}s)`;
-    setTimeout(connectWS, delay);
-  };
-
-  ws.onerror = () => {
-    dot.className = 'ws-dot error';
-    status.textContent = 'XƏTA';
   };
 }
 
-// ════════════════════════════════════════════
-//  PERIODIC REFRESH
-// ════════════════════════════════════════════
-setInterval(async () => {
-  const [a, p] = await Promise.all([
-    apiFetch('/alerts'),
-    apiFetch('/port/summary'),
-  ]);
-  if (a) { alerts = a;  renderAlerts(); }
-  if (p) { portData = p; renderPortCard(); }
-  updateKPIs();
-}, 30000);
+/* ══════════════════ TAB SWITCHING ══════════════════ */
+function showTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`panel-${name}`).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.textContent.trim().toLowerCase().includes(
+      name==='vessel'?'gəmi':name==='reschedule'?'plan':name==='anomaly'?'anomaliya':name==='eta'?'eta':'peyk'
+    )) b.classList.add('active');
+  });
+  if (name === 'reschedule') loadReschedule();
+  if (name === 'anomaly')    loadAnomalies();
+  if (name === 'eta')        loadETA();
+  if (name === 'satellite')  loadSatellite();
+}
 
-// ════════════════════════════════════════════
-//  BOOT
-// ════════════════════════════════════════════
-loadAll();
-connectWS();
+/* ══════════════════ WEATHER BANNER HELPER ══════════════════ */
+function weatherBannerHTML(w) {
+  if (!w) return '';
+  const icon = w.severity === 'KRİTİK' ? '🔴' : w.is_stormy ? '🟡' : '🟢';
+  const cls = w.severity === 'KRİTİK' ? 'stormy' : w.is_stormy ? 'warn' : '';
+  return `<div class="weather-banner ${cls}">
+    <span class="wicon">${icon}</span>
+    <div class="wtext">
+      <strong>${w.status}</strong>
+      <small>Külək: ${w.wind_speed_ms} m/s · Dalğa: ${w.wave_height_m} m · Görünüş: ${w.visibility_km} km</small>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════ PANEL: DYNAMIC RESCHEDULING ══════════════════ */
+async function loadReschedule() {
+  const tableEl = document.getElementById('reschedule-table');
+  const sumEl   = document.getElementById('reschedule-summary');
+  const bannerEl = document.getElementById('weather-banner');
+  tableEl.innerHTML = '<div class="loading-row"><div class="spinner"></div> Hesablanır...</div>';
+  try {
+    const res = await fetch(`${API}/api/reschedule`);
+    const d = await res.json();
+    bannerEl.innerHTML = weatherBannerHTML(d.weather);
+    sumEl.innerHTML = `
+      <div class="sat-grid">
+        <div class="sat-stat"><div class="big">${d.total_vessels}</div><div class="sub">Gəmi</div></div>
+        <div class="sat-stat"><div class="big">${d.total_cargo_tons}</div><div class="sub">Ton</div></div>
+        <div class="sat-stat"><div class="big">${d.total_wagons}</div><div class="sub">Vaqon</div></div>
+        <div class="sat-stat"><div class="big">${d.buffer_hours.toFixed(1)}s</div><div class="sub">Buffer</div></div>
+      </div>
+      ${d.storm_buffer_applied ? '<div style="color:var(--danger);font-size:11px;padding:4px 0">⚠️ Fırtına buferi tətbiq olunub (+3 saat)</div>' : ''}`;
+
+    if (!d.schedule.length) { tableEl.innerHTML = '<div style="color:var(--text-dim);padding:8px">Aktiv gəmi yoxdur</div>'; return; }
+
+    tableEl.innerHTML = `
+      <table class="sched-table">
+        <thead><tr>
+          <th>Gəmi</th><th>Ton</th><th>Vaqon</th><th>ETA (adj.)</th><th>Status</th>
+        </tr></thead>
+        <tbody>
+          ${d.schedule.map(s => `<tr>
+            <td><strong>${s.name||s.mmsi}</strong><br><span style="font-size:10px;color:var(--text-dim)">${s.mmsi}</span></td>
+            <td>${s.cargo_tons}</td>
+            <td>${s.wagons_needed} <span style="color:var(--text-dim);font-size:10px">(∑${s.wagons_cumulative})</span></td>
+            <td style="font-family:var(--font-mono);font-size:10px">${s.eta_adjusted}</td>
+            <td class="priority-${s.priority}">${s.priority}${s.anomaly?'<br><span style="font-size:9px;color:var(--danger)">⚠ Anomaliya</span>':''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) {
+    tableEl.innerHTML = `<div style="color:var(--danger);font-size:11px;padding:4px">Xəta: ${e.message}</div>`;
+  }
+}
+
+/* ══════════════════ PANEL: ANOMALY DETECTION ══════════════════ */
+async function loadAnomalies() {
+  const listEl = document.getElementById('anomaly-list');
+  const sumEl  = document.getElementById('anomaly-summary');
+  listEl.innerHTML = '<div class="loading-row"><div class="spinner"></div> Skan edilir...</div>';
+  try {
+    const res = await fetch(`${API}/api/anomalies`);
+    const d = await res.json();
+    document.getElementById('kpi-alerts').textContent = d.anomaly_count;
+
+    sumEl.innerHTML = `
+      ${weatherBannerHTML(d.weather)}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <div class="sat-stat" style="flex:1"><div class="big">${d.total_scanned}</div><div class="sub">Skan</div></div>
+        <div class="sat-stat" style="flex:1"><div class="big" style="color:var(--danger)">${d.anomaly_count}</div><div class="sub">Anomaliya</div></div>
+      </div>`;
+
+    // Sort: HIGH first
+    const sevOrder = {HIGH:3, MEDIUM:2, LOW:1, NONE:0};
+    d.results.sort((a,b) => (sevOrder[b.severity]||0) - (sevOrder[a.severity]||0));
+
+    listEl.innerHTML = '';
+    d.results.forEach(r => {
+      const icon = r.severity === 'HIGH' ? '🔴' :
+                   r.severity === 'MEDIUM' ? '🟡' :
+                   r.severity === 'LOW' ? '🔵' : '🟢';
+      const div = document.createElement('div');
+      div.className = `anom-item ${r.severity||'NONE'}`;
+      div.innerHTML = `
+        <span class="anom-icon">${icon}</span>
+        <div class="anom-body">
+          <strong>${r.name||r.mmsi}</strong>
+          <span class="anom-badge ${r.severity||'NONE'}" style="float:right">${r.severity||'NONE'}</span>
+          <p>${r.message}</p>
+          ${r.action ? `<div class="action">→ ${r.action}</div>` : ''}
+          ${r.count > 1 ? `<div style="font-size:10px;color:var(--text-dim);margin-top:4px">${r.count} anomaliya aşkarlandı</div>` : ''}
+        </div>`;
+      listEl.appendChild(div);
+    });
+  } catch(e) {
+    listEl.innerHTML = `<div style="color:var(--danger);font-size:11px;padding:4px">Xəta: ${e.message}</div>`;
+  }
+}
+
+/* ══════════════════ PANEL: ETA FORECAST ══════════════════ */
+async function loadETA() {
+  const listEl    = document.getElementById('eta-list');
+  const weatherEl = document.getElementById('eta-weather');
+  listEl.innerHTML = '<div class="loading-row"><div class="spinner"></div> Hesablanır...</div>';
+  try {
+    const res = await fetch(`${API}/api/eta/all`);
+    const d = await res.json();
+    weatherEl.innerHTML = weatherBannerHTML(d.weather);
+
+    const maxH = Math.max(...d.eta_list.map(e => e.hours_remaining), 1);
+
+    listEl.innerHTML = '';
+    d.eta_list.forEach(e => {
+      const pct = Math.max(5, Math.round((1 - e.hours_remaining / maxH) * 100));
+      const barColor = e.hours_remaining < 5 ? 'var(--accent2)' :
+                       e.hours_remaining < 12 ? 'var(--accent)' : 'var(--muted)';
+      const div = document.createElement('div');
+      div.className = 'eta-item';
+      div.innerHTML = `
+        <div class="eta-item-top">
+          <span class="eta-name">${e.name||e.mmsi}</span>
+          <span class="eta-time">${e.eta_display}</span>
+        </div>
+        <div class="eta-bar-wrap">
+          <div class="eta-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+        <div class="eta-meta">
+          <span>${e.hours_remaining}s · ${e.distance_km}km</span>
+          <span>${e.effective_speed_knots}kt · ${e.confidence_pct}</span>
+        </div>`;
+      listEl.appendChild(div);
+    });
+  } catch(e) {
+    listEl.innerHTML = `<div style="color:var(--danger);font-size:11px;padding:4px">Xəta: ${e.message}</div>`;
+  }
+}
+
+/* ══════════════════ PANEL: SATELLITE ══════════════════ */
+async function loadSatellite() {
+  const el = document.getElementById('sat-content');
+  el.innerHTML = '<div class="loading-row"><div class="spinner"></div> Peyk bağlantısı...</div>';
+  try {
+    const res = await fetch(`${API}/api/satellite`);
+    const d = await res.json();
+    const sigPct = Math.round(((d.signal_strength_db + 100) / 22) * 100);
+
+    el.innerHTML = `
+      <div class="sat-orbit">
+        <div style="font-size:48px;margin-bottom:4px">🛰️</div>
+        <div style="font-family:var(--font-ui);font-size:14px;font-weight:700;color:var(--accent)">${d.satellite_id}</div>
+        <div style="font-size:11px;color:var(--text-dim)">${d.orbit_type} · ${d.altitude_km.toLocaleString()} km</div>
+        <div style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:3px">
+            <span>Siqnal</span><span>${d.signal_strength_db} dB</span>
+          </div>
+          <div class="signal-bar" style="position:relative">
+            <div style="position:absolute;top:0;left:0;height:100%;width:${sigPct}%;background:rgba(0,0,0,.4);border-radius:3px;right:0;left:${sigPct}%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sat-grid">
+        <div class="sat-stat">
+          <div class="big">${d.vessels_detected}</div>
+          <div class="sub">Gəmi Aşkarlandı</div>
+        </div>
+        <div class="sat-stat">
+          <div class="big" style="color:var(--danger)">${d.dark_vessels_flagged}</div>
+          <div class="sub">Dark Vessel</div>
+        </div>
+        <div class="sat-stat">
+          <div class="big">${d.cloud_cover_pct}%</div>
+          <div class="sub">Bulud Örtüyü</div>
+        </div>
+        <div class="sat-stat">
+          <div class="big">${d.next_scan_min}dk</div>
+          <div class="sub">Növbəti Skan</div>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <h4>Peyk Detalları</h4>
+        <div class="row-kv"><span class="k">Mənbə</span><span class="v accent">${d.source}</span></div>
+        <div class="row-kv"><span class="k">Rezolüsiya</span><span class="v">${d.resolution_m} m</span></div>
+        <div class="row-kv"><span class="k">Görüş zolağı</span><span class="v">${d.swath_km} km</span></div>
+        <div class="row-kv"><span class="k">Əhatə</span><span class="v">${d.coverage_area}</span></div>
+        <div class="row-kv"><span class="k">Son skan</span><span class="v green">${d.last_scan}</span></div>
+        <div class="row-kv"><span class="k">SAR rejimi</span><span class="v ${d.sar_mode_active?'warn':'green'}">${d.sar_mode_active?'AKTİV (bulud)':'Söndürülüb'}</span></div>
+        <div class="row-kv"><span class="k">Skan keyfiyyəti</span><span class="v">${d.scan_quality}</span></div>
+        <div class="row-kv"><span class="k">Uplink</span><span class="v green">${d.uplink_status}</span></div>
+        <div class="row-kv"><span class="k">DB aktiv gəmi</span><span class="v">${d.db_active_vessels}</span></div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--danger);font-size:11px;padding:4px">Xəta: ${e.message}</div>`;
+  }
+}
+
+/* ══════════════════ INITIAL LOAD ══════════════════ */
+async function bootstrap() {
+  initMap();
+  initWS();
+  // Preload vessel list via REST as fallback
+  try {
+    const res = await fetch(`${API}/vessels`);
+    const list = await res.json();
+    list.forEach(v => { vessels[v.mmsi] = v; });
+    renderVesselList(); updateMarkers();
+  } catch(e) { console.warn('REST vessels fetch failed:', e); }
+}
+
+document.addEventListener('DOMContentLoaded', bootstrap);
+
+// Auto-refresh panels every 30s
+setInterval(() => {
+  const active = document.querySelector('.panel.active');
+  if (!active) return;
+  const id = active.id;
+  if (id === 'panel-reschedule') loadReschedule();
+  if (id === 'panel-anomaly')    loadAnomalies();
+  if (id === 'panel-eta')        loadETA();
+  if (id === 'panel-satellite')  loadSatellite();
+}, 30000);
 </script>
 </body>
 </html>
