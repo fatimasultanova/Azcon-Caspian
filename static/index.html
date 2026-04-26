@@ -472,13 +472,18 @@ function initMap() {
 function vesselIcon(v) {
   const col = v.status === 'active' ? '#00ff9d' :
               v.status === 'dark'   ? '#ff4060' : '#ffaa00';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="28" viewBox="0 0 22 28">
-    <polygon points="11,2 20,24 11,19 2,24" fill="${col}" fill-opacity=".9"
-      stroke="#000" stroke-width="1"
-      transform="rotate(${v.course_deg||0},11,14)"/>
+  const glow = v.status === 'active' ? '#00ff9d' :
+               v.status === 'dark'   ? '#ff4060' : '#ffaa00';
+  const rot  = (v.course_deg || 0);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="30"
+      viewBox="0 0 24 30" style="transform:rotate(${rot}deg);transform-origin:12px 15px;
+      filter:drop-shadow(0 0 4px{glow})">
+    <polygon points="12,2 22,26 12,20 2,26"
+      fill="${col}" fill-opacity=".92" stroke="#0a0f18" stroke-width="1.2"/>
   </svg>`;
   return L.divIcon({
-    html: svg, className: '', iconSize: [22,28], iconAnchor: [11,14]
+    html: svg, className: '',
+    iconSize: [24, 30], iconAnchor: [12, 15]
   });
 }
 
@@ -563,19 +568,80 @@ async function fetchDetailedETA(mmsi) {
 }
 
 /* ══════════════════ MAP MARKERS ══════════════════ */
+/* ── Trail (iz xətti) saxlayan struktur ── */
+const trails = {};        // mmsi → L.polyline
+const trailHistory = {};  // mmsi → [[lat,lon], ...]
+const TRAIL_LEN = 100;     // neçə nöqtə saxlanır
+
+/* ── Axıcı interpolasiya üçün ── */
+const markerTargets = {}; // mmsi → {lat, lon}
+let animFrame = null;
+
+function lerpMarkers() {
+  let anyMoving = false;
+  Object.keys(markerTargets).forEach(mmsi => {
+    const m = markers[mmsi];
+    if (!m) return;
+    const target = markerTargets[mmsi];
+    const cur = m.getLatLng();
+    const dlat = target.lat - cur.lat;
+    const dlon = target.lon - cur.lng;
+    if (Math.abs(dlat) < 0.00001 && Math.abs(dlon) < 0.00001) return;
+    anyMoving = true;
+    // Easing: hər frame-də 22% qalan məsafəni keçir (60fps × 0.08 = çox sürətli)
+    m.setLatLng([cur.lat + dlat * 0.08, cur.lng + dlon * 0.08]);
+  });
+  animFrame = requestAnimationFrame(lerpMarkers);
+}
+
 function updateMarkers() {
   Object.values(vessels).forEach(v => {
     if (!v.lat || !v.lon) return;
+
     if (markers[v.mmsi]) {
-      markers[v.mmsi].setLatLng([v.lat, v.lon]).setIcon(vesselIcon(v));
+      // Hədəfi yenilə — lerp loop oraya doğru hərəkət edəcək
+      markerTargets[v.mmsi] = { lat: v.lat, lon: v.lon };
+      // İkonu yenilə (kurs dəyişirsə)
+      markers[v.mmsi].setIcon(vesselIcon(v));
+      markers[v.mmsi].setTooltipContent(
+        `<b>${v.name||v.mmsi}</b><br>${(v.speed_knots||0).toFixed(1)} kt · ${(v.course_deg||0).toFixed(0)}° · ${v.status}`
+      );
+
+      // Trail (iz xətti) yenilə
+      if (!trailHistory[v.mmsi]) trailHistory[v.mmsi] = [];
+      trailHistory[v.mmsi].push([v.lat, v.lon]);
+      if (trailHistory[v.mmsi].length > TRAIL_LEN)
+        trailHistory[v.mmsi].shift();
+
+      if (trails[v.mmsi]) {
+        trails[v.mmsi].setLatLngs(trailHistory[v.mmsi]);
+      } else {
+        const col = v.status === 'active' ? '#00ff9d' :
+                    v.status === 'dark'   ? '#ff4060' : '#ffaa00';
+        trails[v.mmsi] = L.polyline(trailHistory[v.mmsi], {
+          color: col, weight: 1.5, opacity: 0.45,
+          dashArray: '4 4',
+        }).addTo(vesselLayer);
+      }
+
     } else {
+      // Yeni marker yarat
       markers[v.mmsi] = L.marker([v.lat, v.lon], { icon: vesselIcon(v) })
         .addTo(vesselLayer)
-        .bindTooltip(`<b>${v.name||v.mmsi}</b><br>${(v.speed_knots||0).toFixed(1)} kt | ${v.status}`,
-          { direction: 'top', className: '' })
+        .bindTooltip(
+          `<b>${v.name||v.mmsi}</b><br>${(v.speed_knots||0).toFixed(1)} kt · ${v.status}`,
+          { direction: 'top', opacity: 0.9 }
+        )
         .on('click', () => selectVessel(v.mmsi));
+
+      markerTargets[v.mmsi] = { lat: v.lat, lon: v.lon };
+      trailHistory[v.mmsi] = [[v.lat, v.lon]];
     }
   });
+
+  // Lerp loop-u başlat (bir dəfə)
+  if (!animFrame) lerpMarkers();
+
   updateKPIs();
 }
 
@@ -592,6 +658,13 @@ function updateKPIs() {
 }
 
 /* ══════════════════ WEBSOCKET ══════════════════ */
+let _listRenderTimer = null;
+function scheduleListRender() {
+  // Siyahını maksimum 2 dəfə/saniyə yenilə — DOM thrashing qarşısını alır
+  if (_listRenderTimer) return;
+  _listRenderTimer = setTimeout(() => { renderVesselList(); _listRenderTimer = null; }, 500);
+}
+
 function initWS() {
   const ws = new WebSocket(WS_URL);
   const statusEl = document.getElementById('ws-status');
@@ -607,7 +680,10 @@ function initWS() {
       data.vessels.forEach(v => {
         vessels[v.mmsi] = { ...vessels[v.mmsi], ...v };
       });
-      renderVesselList(); updateMarkers();
+      // Marker-lar dərhal yenilənir (hərəkət görünsün)
+      updateMarkers();
+      // Siyahı isə debounce ilə (performans)
+      scheduleListRender();
     }
   };
 }

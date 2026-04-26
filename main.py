@@ -392,8 +392,16 @@ manager = ConnectionManager()
 
 
 async def simulate_vessel_movement():
+    """
+    Sürətli simulyasiya:
+      - Hər 0.8 saniyədə yenilənir (əvvəl 5s idi)
+      - Addım ölçüsü 0.06° (əvvəl 0.002° idi — 9× sürətli)
+      - Kurs dinamik hesablanır (atan2)
+      - Sürət dalğalanır ±0.3 kt
+      - Limana 0.05° yaxınlaşanda 'anchored' statusuna keçir
+    """
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(0.8)
         if not manager.active or pool is None:
             continue
         try:
@@ -403,22 +411,58 @@ async def simulate_vessel_movement():
             )
             updates = []
             for r in rows:
-                dlon = (BAKU_PORT[0] - r["lon"]) * 0.002
-                dlat = (BAKU_PORT[1] - r["lat"]) * 0.002
-                new_lon = r["lon"] + dlon + random.uniform(-0.001, 0.001)
-                new_lat = r["lat"] + dlat + random.uniform(-0.001, 0.001)
+                dx = BAKU_PORT[0] - r["lon"]
+                dy = BAKU_PORT[1] - r["lat"]
+                dist = math.sqrt(dx*dx + dy*dy)
+
+                # Limana çatdısa anchored et
+                if dist < 0.05:
+                    await pool.execute(
+                        "UPDATE vessels SET status='anchored', last_seen=NOW() WHERE mmsi=$1",
+                        r["mmsi"]
+                    )
+                    updates.append({
+                        "type": "vessel_update",
+                        "mmsi": r["mmsi"],
+                        "lon": round(r["lon"], 5),
+                        "lat": round(r["lat"], 5),
+                        "speed_knots": 0.0,
+                        "course_deg": r["course_deg"],
+                        "status": "anchored",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    })
+                    continue
+
+                # Hərəkət addımı — 0.018° (≈2 km/addım)
+                step = 0.06
+                norm = dist if dist > 0 else 1
+                dlon = (dx / norm) * step + random.uniform(-0.002, 0.002)
+                dlat = (dy / norm) * step + random.uniform(-0.002, 0.002)
+
+                new_lon = r["lon"] + dlon
+                new_lat = r["lat"] + dlat
+
+                # Dinamik kurs hesabı (atan2, şimal = 0°)
+                course_rad = math.atan2(dx, dy)
+                new_course = (math.degrees(course_rad) + 360) % 360
+
+                # Sürət dalğalanması
+                new_speed = max(2.0, r["speed_knots"] + random.uniform(-0.3, 0.3))
+
                 await pool.execute(
-                    "UPDATE vessels SET location=ST_SetSRID(ST_MakePoint($1,$2),4326), "
-                    "last_seen=NOW() WHERE mmsi=$3",
-                    new_lon, new_lat, r["mmsi"],
+                    "UPDATE vessels SET "
+                    "location=ST_SetSRID(ST_MakePoint($1,$2),4326), "
+                    "course_deg=$3, speed_knots=$4, last_seen=NOW() "
+                    "WHERE mmsi=$5",
+                    new_lon, new_lat, round(new_course, 1), round(new_speed, 2), r["mmsi"],
                 )
                 updates.append({
                     "type": "vessel_update",
                     "mmsi": r["mmsi"],
                     "lon": round(new_lon, 5),
                     "lat": round(new_lat, 5),
-                    "speed_knots": r["speed_knots"],
-                    "course_deg": r["course_deg"],
+                    "speed_knots": round(new_speed, 1),
+                    "course_deg": round(new_course, 1),
                     "status": r["status"],
                     "ts": datetime.now(timezone.utc).isoformat(),
                 })
