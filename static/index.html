@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+    <meta charset="UTF-8">
+    <title>Caspian Maritime Radar - Live</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
+        #map { height: 100vh; width: 100%; }
+
+        /* Gəmi markerinin hamar hərəkət etməsi üçün CSS */
+        .leaflet-marker-icon {
+            transition: all 1.5s linear !important;
+        }
+
+        /* Münsiflər üçün sol yuxarıda məlumat paneli */
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace;
+            border: 1px solid #333;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info-panel">
+        <div style="font-weight: bold; margin-bottom: 5px;">📡 CASPIAN RADAR SYSTEM</div>
+        <div id="status">Status: Active</div>
+        <div id="vessel-count">Vessels: 0</div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Xəritəni qaranlıq (Dark Mode) stilində göstərmək daha professional görünür
+        var map = L.map('map').setView([40.4, 50.5], 7);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // Gəmi simvolu (SVG - gəmi ikonu)
+        var shipIcon = L.divIcon({
+            html: `
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 3L4 18L12 16L20 18L12 3Z" fill="#33ccff" stroke="white" stroke-width="1" stroke-linejoin="round"/>
+                </svg>`,
+            className: 'ship-svg-icon',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+
+        var markers = {};
+
+        async function updateVessels() {
+            try {
+                const response = await fetch('/vessels');
+                const data = await response.json();
+
+                document.getElementById('vessel-count').innerText = `Vessels: ${data.length}`;
+
+                data.forEach(vessel => {
+                    // API-dən gələn field adlarına diqqət et (böyük/kiçik hərf)
+                    const lat = vessel.LAT || vessel.lat;
+                    const lon = vessel.LON || vessel.lon;
+                    const mmsi = vessel.MMSI || vessel.mmsi;
+                    const name = vessel.SHIPNAME || vessel.name;
+                    const type = vessel.SHIPTYPE || 'N/A';
+
+                    if (markers[mmsi]) {
+                        // Əgər gəmi artıq varsa, sadəcə yerini dəyiş (transition işə düşəcək)
+                        markers[mmsi].setLatLng([lat, lon]);
+                    } else {
+                        // Yeni gəmi yaradılırsa
+                        markers[mmsi] = L.marker([lat, lon], {icon: shipIcon})
+                            .addTo(map)
+                            .bindPopup(`<b>${name}</b><br>Tipi: ${type}<br>MMSI: ${mmsi}`);
+                    }
+                });
+            } catch (e) {
+                console.error("Radar xətası:", e);
+                document.getElementById('status').innerText = "Status: Error";
+            }
+        }
+
+        // Hər 2 saniyədən bir bazanı yoxla (Sürətli hərəkət üçün)
+        setInterval(updateVessels, 2000);
+        updateVessels();
+    </script>
+</body>
+</html>
