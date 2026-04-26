@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
 import asyncpg
+from ai_engine import ai_core
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
