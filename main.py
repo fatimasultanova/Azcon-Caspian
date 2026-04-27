@@ -35,6 +35,109 @@ pool: asyncpg.Pool | None = None
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+
+    async with pool.acquire() as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+        await conn.execute("""
+                           CREATE TABLE IF NOT EXISTS vessels
+                           (
+                               id
+                               SERIAL
+                               PRIMARY
+                               KEY,
+                               mmsi
+                               VARCHAR
+                           (
+                               9
+                           ) UNIQUE NOT NULL,
+                               name VARCHAR
+                           (
+                               100
+                           ), vessel_type VARCHAR
+                           (
+                               50
+                           ), flag VARCHAR
+                           (
+                               3
+                           ),
+                               length_m FLOAT, width_m FLOAT,
+                               location GEOMETRY
+                           (
+                               Point,
+                               4326
+                           ),
+                               speed_knots FLOAT, course_deg FLOAT,
+                               status VARCHAR
+                           (
+                               20
+                           ) DEFAULT 'active',
+                               cargo_tons FLOAT, destination VARCHAR
+                           (
+                               100
+                           ),
+                               eta TIMESTAMPTZ, eta_confidence FLOAT,
+                               last_seen TIMESTAMPTZ DEFAULT NOW
+                           (
+                           ),
+                               updated_at TIMESTAMPTZ DEFAULT NOW
+                           (
+                           )
+                               );
+                           """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS vessels_location_idx ON vessels USING GIST (location);")
+        await conn.execute("""
+                           CREATE TABLE IF NOT EXISTS alerts
+                           (
+                               id
+                               SERIAL
+                               PRIMARY
+                               KEY,
+                               vessel_mmsi
+                               VARCHAR
+                           (
+                               9
+                           ),
+                               alert_type VARCHAR
+                           (
+                               50
+                           ), severity VARCHAR
+                           (
+                               10
+                           ),
+                               message TEXT, location GEOMETRY
+                           (
+                               Point,
+                               4326
+                           ),
+                               resolved BOOLEAN DEFAULT FALSE,
+                               created_at TIMESTAMPTZ DEFAULT NOW
+                           (
+                           )
+                               );
+                           """)
+        await conn.execute("""
+                           INSERT INTO vessels (mmsi, name, vessel_type, flag, length_m, width_m, location, speed_knots,
+                                                course_deg, cargo_tons, destination, eta, eta_confidence)
+                           VALUES ('423001001', 'BAKU STAR', 'cargo', 'AZ', 120, 18,
+                                   ST_SetSRID(ST_MakePoint(49.8, 40.4), 4326), 8.2, 185, 450, 'Baki Limani',
+                                   NOW() + '4 hours'::interval, 0.87),
+                                  ('423001002', 'XEZER QIZILI', 'tanker', 'AZ', 145, 22,
+                                   ST_SetSRID(ST_MakePoint(51.2, 41.8), 4326), 6.5, 220, 820, 'Baki Limani',
+                                   NOW() + '7 hours'::interval, 0.72),
+                                  ('423001003', 'ABSHERON', 'ferry', 'AZ', 95, 16,
+                                   ST_SetSRID(ST_MakePoint(50.1, 43.2), 4326), 11.0, 195, 180, 'Aktau',
+                                   NOW() + '11 hours'::interval, 0.91),
+                                  ('436001001', 'AKTAU EXPRESS', 'cargo', 'KZ', 110, 17,
+                                   ST_SetSRID(ST_MakePoint(51.8, 44.1), 4326), 7.8, 170, 560, 'Baki Limani',
+                                   NOW() + '9 hours'::interval, 0.68),
+                                  ('436001002', 'MANGISTAU', 'tanker', 'KZ', 138, 21,
+                                   ST_SetSRID(ST_MakePoint(52.4, 42.5), 4326), 5.2, 210, 910, 'Baki Limani',
+                                   NOW() + '14 hours'::interval, 0.55),
+                                  ('438001001', 'TURKMENBASHI', 'cargo', 'TM', 100, 16,
+                                   ST_SetSRID(ST_MakePoint(53.0, 40.0), 4326), 9.1, 270, 320, 'Turkmenbasi',
+                                   NOW() + '6 hours'::interval, 0.83) ON CONFLICT (mmsi) DO NOTHING;
+                           """)
+
     yield
     await pool.close()
 
