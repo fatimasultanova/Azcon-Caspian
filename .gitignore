@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.idea/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+
+# Environment variables
+.env
+
+# UV package manager
+uv.lock
+
+# Pytest
+.pytest_cache/
+
+# Docker
+pgdata/
+
+# OS
+.DS_Store
+Thumbs.db
