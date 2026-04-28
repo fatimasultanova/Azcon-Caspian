@@ -310,47 +310,29 @@ async def vessels_near_port(radius_km: float = 50):
 @app.get("/api/reschedule")
 async def api_reschedule():
     rows = await pool.fetch(
-        """SELECT mmsi, name, cargo_tons, lon, lat, speed_knots, eta
+        """SELECT mmsi, name, cargo_tons, lon, lat, speed_knots, course_deg, status, eta
            FROM vessels
            WHERE destination = 'Bakı Limanı' AND status = 'active'
            ORDER BY eta ASC LIMIT 15"""
     )
     weather = ai_core.get_current_weather()
-    result = []
-    cumulative = 0
-    for r in rows:
-        eta_info = ai_core.calculate_eta(
-            lon=r["lon"], lat=r["lat"],
-            speed=r["speed_knots"] or 0,
-            weather=weather,
-        )
-        hours = eta_info["hours_remaining"]
-        rail_time = ai_core.dynamic_rail_sync(hours, weather)
-        wagons = math.ceil((r["cargo_tons"] or 0) / 80)
-        cumulative += wagons
-        priority = "HIGH" if hours < 5 else "MEDIUM" if hours < 10 else "NORMAL"
-        result.append({
+
+    vessels_input = [
+        {
             "mmsi": r["mmsi"],
             "name": r["name"],
-            "cargo_tons": r["cargo_tons"],
-            "eta_adjusted": rail_time,
-            "wagons_needed": wagons,
-            "wagons_cumulative": cumulative,
-            "priority": priority,
-            "anomaly": False,
-        })
+            "lon": r["lon"],
+            "lat": r["lat"],
+            "speed_knots": r["speed_knots"] or 0,
+            "cargo_tons": r["cargo_tons"] or 0,
+            "course_deg": r["course_deg"] or 0,
+            "status": r["status"],
+        }
+        for r in rows
+    ]
 
-    total_cargo = sum(r["cargo_tons"] or 0 for r in rows)
-    buffer = 2.5 + (3.0 if weather["is_stormy"] else 0)
-    return {
-        "weather": weather,
-        "schedule": result,
-        "total_vessels": len(result),
-        "total_cargo_tons": round(total_cargo, 1),
-        "total_wagons": cumulative,
-        "buffer_hours": buffer,
-        "storm_buffer_applied": weather["is_stormy"],
-    }
+    result = ai_core.dynamic_rail_sync(vessels=vessels_input, weather=weather)
+    return result
 
 @app.get("/api/anomalies")
 async def api_anomalies():
@@ -361,41 +343,23 @@ async def api_anomalies():
     results = []
 
     for r in rows:
-        anomaly_msg = ai_core.detect_anomaly(
-            r["speed_knots"] or 0,
-            r["lat"],
-            r["lon"],
-            weather,
+        anom = ai_core.detect_anomaly(
+            mmsi=r["mmsi"],
+            lon=r["lon"],
+            lat=r["lat"],
+            speed_knots=r["speed_knots"] or 0,
+            course_deg=r["course_deg"] or 0,
+            status=r["status"],
+            cargo_tons=r["cargo_tons"] or 0,
+            weather=weather,
         )
-        if "Təhlükəli" in anomaly_msg or "Həddi" in anomaly_msg:
-            severity = "HIGH"
-        elif "Zona" in anomaly_msg:
-            severity = "MEDIUM"
-        elif anomaly_msg != "✅ Stabil":
-            severity = "LOW"
-        else:
-            severity = "NONE"
-
         results.append({
             "mmsi": r["mmsi"],
             "name": r["name"],
-            "severity": severity,
-            "message": anomaly_msg,
-            "action": "Gəmi ilə əlaqə saxlayın" if severity == "HIGH" else None,
-            "count": 1,
-        })
-
-    db_alerts = await pool.fetch(
-        "SELECT vessel_mmsi, alert_type, severity, message FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"
-    )
-    for a in db_alerts:
-        results.append({
-            "mmsi": a["vessel_mmsi"],
-            "name": a["vessel_mmsi"],
-            "severity": a["severity"].upper(),
-            "message": a["message"],
-            "action": None,
-            "count": 1,
+            "severity": anom["severity"],
+            "message": anom["message"],
+            "action": anom["action"],
+            "count": anom.get("count", 1) if anom["anomaly"] else 0,
         })
 
     anomaly_count = sum(1 for r in results if r["severity"] != "NONE")
@@ -405,7 +369,6 @@ async def api_anomalies():
         "anomaly_count": anomaly_count,
         "total_scanned": len(rows),
     }
-
 
 @app.get("/api/eta/all")
 async def api_eta_all():
