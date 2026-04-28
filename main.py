@@ -317,31 +317,40 @@ async def api_reschedule():
     )
     weather = ai_core.get_current_weather()
     result = []
+    cumulative = 0
     for r in rows:
         eta_info = ai_core.calculate_eta(
-            lon=r["lon"],
-            lat=r["lat"],
-            speed_knots=r["speed_knots"] or 0,
-            cargo_tons=r["cargo_tons"] or 0,
+            lon=r["lon"], lat=r["lat"],
+            speed=r["speed_knots"] or 0,
             weather=weather,
         )
         hours = eta_info["hours_remaining"]
         rail_time = ai_core.dynamic_rail_sync(hours, weather)
         wagons = math.ceil((r["cargo_tons"] or 0) / 80)
+        cumulative += wagons
+        priority = "HIGH" if hours < 5 else "MEDIUM" if hours < 10 else "NORMAL"
         result.append({
             "mmsi": r["mmsi"],
             "name": r["name"],
             "cargo_tons": r["cargo_tons"],
-            "eta_hours": hours,
-            "eta_display": eta_info["eta_display"],
-            "confidence": eta_info["confidence_pct"],
-            "rail_ready_time": rail_time,
+            "eta_adjusted": rail_time,
             "wagons_needed": wagons,
-            "weather_status": weather["status"],
-            "is_stormy": weather["is_stormy"],
+            "wagons_cumulative": cumulative,
+            "priority": priority,
+            "anomaly": False,
         })
-    return {"weather": weather, "schedule": result}
 
+    total_cargo = sum(r["cargo_tons"] or 0 for r in rows)
+    buffer = 2.5 + (3.0 if weather["is_stormy"] else 0)
+    return {
+        "weather": weather,
+        "schedule": result,
+        "total_vessels": len(result),
+        "total_cargo_tons": round(total_cargo, 1),
+        "total_wagons": cumulative,
+        "buffer_hours": buffer,
+        "storm_buffer_applied": weather["is_stormy"],
+    }
 
 @app.get("/api/anomalies")
 async def api_anomalies():
@@ -349,40 +358,57 @@ async def api_anomalies():
         "SELECT mmsi, name, lon, lat, speed_knots, course_deg, status, cargo_tons FROM vessels WHERE status != 'inactive'"
     )
     weather = ai_core.get_current_weather()
-    anomalies = []
+    results = []
+
     for r in rows:
-        # Köhnə ai_engine: detect_anomaly(speed, lat, lon, weather) → str
-        result = ai_core.detect_anomaly(
+        anomaly_msg = ai_core.detect_anomaly(
             r["speed_knots"] or 0,
             r["lat"],
             r["lon"],
             weather,
         )
-        if result != "✅ Stabil":
-            anomalies.append({
-                "mmsi": r["mmsi"],
-                "name": r["name"],
-                "lon": r["lon"],
-                "lat": r["lat"],
-                "anomaly": result,
-                "speed_knots": r["speed_knots"],
-            })
+        if "Təhlükəli" in anomaly_msg or "Həddi" in anomaly_msg:
+            severity = "HIGH"
+        elif "Zona" in anomaly_msg:
+            severity = "MEDIUM"
+        elif anomaly_msg != "✅ Stabil":
+            severity = "LOW"
+        else:
+            severity = "NONE"
+
+        results.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            "severity": severity,
+            "message": anomaly_msg,
+            "action": "Gəmi ilə əlaqə saxlayın" if severity == "HIGH" else None,
+            "count": 1,
+        })
 
     db_alerts = await pool.fetch(
-        "SELECT vessel_mmsi, alert_type, severity, message, created_at "
-        "FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"
+        "SELECT vessel_mmsi, alert_type, severity, message FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"
     )
+    for a in db_alerts:
+        results.append({
+            "mmsi": a["vessel_mmsi"],
+            "name": a["vessel_mmsi"],
+            "severity": a["severity"].upper(),
+            "message": a["message"],
+            "action": None,
+            "count": 1,
+        })
+
+    anomaly_count = sum(1 for r in results if r["severity"] != "NONE")
     return {
         "weather": weather,
-        "ai_anomalies": anomalies,
-        "db_alerts": [dict(a) for a in db_alerts],
-        "total": len(anomalies) + len(db_alerts),
+        "results": results,
+        "anomaly_count": anomaly_count,
+        "total_scanned": len(rows),
     }
 
 
 @app.get("/api/eta/all")
 async def api_eta_all():
-    """Bütün aktiv gəmilərin ETA hesablaması."""
     rows = await pool.fetch(
         """SELECT mmsi, name, vessel_type, flag, cargo_tons, lon, lat,
                   speed_knots, destination
@@ -393,20 +419,19 @@ async def api_eta_all():
     for r in rows:
         eta_obj = calculate_eta(r["lon"], r["lat"], r["speed_knots"], r["cargo_tons"] or 0)
         eta_obj.mmsi = r["mmsi"]
+        hours = round((eta_obj.eta - datetime.now(timezone.utc)).total_seconds() / 3600, 1)
         result.append({
             "mmsi": r["mmsi"],
             "name": r["name"],
-            "vessel_type": r["vessel_type"],
-            "flag": r["flag"],
             "destination": r["destination"],
-            "eta": eta_obj.eta,
-            "confidence": eta_obj.confidence,
+            "eta_display": eta_obj.eta.strftime("%d %b %H:%M"),
+            "hours_remaining": max(0, hours),
             "distance_km": eta_obj.distance_km,
-            "speed_knots": eta_obj.speed_knots,
-            "weather_factor": eta_obj.weather_factor,
+            "effective_speed_knots": eta_obj.speed_knots,
+            "confidence_pct": f"{int(eta_obj.confidence * 100)}%",
         })
-    result.sort(key=lambda x: x["eta"])
-    return {"weather": weather, "vessels": result, "count": len(result)}
+    result.sort(key=lambda x: x["hours_remaining"])
+    return {"weather": weather, "eta_list": result, "count": len(result)}
 
 
 @app.get("/api/satellite")
