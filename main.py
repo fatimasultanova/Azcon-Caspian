@@ -230,6 +230,36 @@ async def get_vessels(status: Optional[str] = None):
     return [dict(r) for r in rows]
 
 
+@app.get("/api/eta/{mmsi}")
+async def api_eta_single(mmsi: str):
+    row = await pool.fetchrow(
+        "SELECT mmsi, name, lon, lat, speed_knots, cargo_tons FROM vessels WHERE mmsi = $1",
+        mmsi,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Gəmi tapılmadı")
+
+    weather = ai_core.get_current_weather(row["lat"], row["lon"])
+    eta_info = ai_core.calculate_eta(
+        lon=row["lon"],
+        lat=row["lat"],
+        speed_knots=row["speed_knots"] or 0,
+        cargo_tons=row["cargo_tons"] or 0,
+        weather=weather,
+    )
+    return {
+        "mmsi": mmsi,
+        "eta_display": eta_info["eta_display"],
+        "hours_remaining": eta_info["hours_remaining"],
+        "distance_km": eta_info["distance_km"],
+        "distance_nm": eta_info["distance_nm"],
+        "effective_speed_knots": eta_info["effective_speed_knots"],
+        "weather_factor": eta_info["weather_factor"],
+        "confidence_pct": eta_info["confidence_pct"],
+        "weather": weather,
+    }
+
+
 @app.get("/vessels/{mmsi}", response_model=VesselOut)
 async def get_vessel(mmsi: str):
     row = await pool.fetchrow(
