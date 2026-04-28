@@ -337,3 +337,6 @@ async def vessel_stream(ws: WebSocket):
 @app.on_event("startup")
 async def start_simulation():
     asyncio.create_task(simulate_vessel_movement())
+    # AIS puller-i də başlat (demo rejimində)
+    from ais_puller import pull_loop
+    asyncio.create_task(pull_loop(interval=60))
