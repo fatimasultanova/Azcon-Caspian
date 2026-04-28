@@ -318,16 +318,23 @@ async def api_reschedule():
     weather = ai_core.get_current_weather()
     result = []
     for r in rows:
-        # Köhnə ai_engine: calculate_eta(lat, lon, speed, weather) → float
-        eta_hours = ai_core.calculate_eta(r["lat"], r["lon"], r["speed_knots"] or 0, weather)
-        # Köhnə ai_engine: dynamic_rail_sync(eta_hours, weather) → str
-        rail_time = ai_core.dynamic_rail_sync(eta_hours, weather)
+        eta_info = ai_core.calculate_eta(
+            lon=r["lon"],
+            lat=r["lat"],
+            speed_knots=r["speed_knots"] or 0,
+            cargo_tons=r["cargo_tons"] or 0,
+            weather=weather,
+        )
+        hours = eta_info["hours_remaining"]
+        rail_time = ai_core.dynamic_rail_sync(hours, weather)
         wagons = math.ceil((r["cargo_tons"] or 0) / 80)
         result.append({
             "mmsi": r["mmsi"],
             "name": r["name"],
             "cargo_tons": r["cargo_tons"],
-            "eta_hours": eta_hours,
+            "eta_hours": hours,
+            "eta_display": eta_info["eta_display"],
+            "confidence": eta_info["confidence_pct"],
             "rail_ready_time": rail_time,
             "wagons_needed": wagons,
             "weather_status": weather["status"],
