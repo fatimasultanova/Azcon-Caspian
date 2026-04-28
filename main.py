@@ -229,6 +229,32 @@ async def get_vessels(status: Optional[str] = None):
     rows = await pool.fetch(query, status)
     return [dict(r) for r in rows]
 
+@app.get("/api/eta/all")
+async def api_eta_all():
+    rows = await pool.fetch(
+        """SELECT mmsi, name, vessel_type, flag, cargo_tons, lon, lat,
+                  speed_knots, destination
+           FROM vessels WHERE status = 'active'"""
+    )
+    weather = ai_core.get_current_weather()
+    result = []
+    for r in rows:
+        eta_obj = calculate_eta(r["lon"], r["lat"], r["speed_knots"], r["cargo_tons"] or 0)
+        eta_obj.mmsi = r["mmsi"]
+        hours = round((eta_obj.eta - datetime.now(timezone.utc)).total_seconds() / 3600, 1)
+        result.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            "destination": r["destination"],
+            "eta_display": eta_obj.eta.strftime("%d %b %H:%M"),
+            "hours_remaining": max(0, hours),
+            "distance_km": eta_obj.distance_km,
+            "effective_speed_knots": eta_obj.speed_knots,
+            "confidence_pct": f"{int(eta_obj.confidence * 100)}%",
+        })
+    result.sort(key=lambda x: x["hours_remaining"])
+    return {"weather": weather, "eta_list": result, "count": len(result)}
+
 
 @app.get("/api/eta/{mmsi}")
 async def api_eta_single(mmsi: str):
@@ -400,31 +426,6 @@ async def api_anomalies():
         "total_scanned": len(rows),
     }
 
-@app.get("/api/eta/all")
-async def api_eta_all():
-    rows = await pool.fetch(
-        """SELECT mmsi, name, vessel_type, flag, cargo_tons, lon, lat,
-                  speed_knots, destination
-           FROM vessels WHERE status = 'active'"""
-    )
-    weather = ai_core.get_current_weather()
-    result = []
-    for r in rows:
-        eta_obj = calculate_eta(r["lon"], r["lat"], r["speed_knots"], r["cargo_tons"] or 0)
-        eta_obj.mmsi = r["mmsi"]
-        hours = round((eta_obj.eta - datetime.now(timezone.utc)).total_seconds() / 3600, 1)
-        result.append({
-            "mmsi": r["mmsi"],
-            "name": r["name"],
-            "destination": r["destination"],
-            "eta_display": eta_obj.eta.strftime("%d %b %H:%M"),
-            "hours_remaining": max(0, hours),
-            "distance_km": eta_obj.distance_km,
-            "effective_speed_knots": eta_obj.speed_knots,
-            "confidence_pct": f"{int(eta_obj.confidence * 100)}%",
-        })
-    result.sort(key=lambda x: x["hours_remaining"])
-    return {"weather": weather, "eta_list": result, "count": len(result)}
 
 
 @app.get("/api/satellite")
