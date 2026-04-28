@@ -1,6 +1,6 @@
 """
 Caspian Corridor Intelligence — Backend
-FastAPI + PostgreSQL + WebSocket (PostGIS-siz versiyon)
+FastAPI + PostgreSQL (PostGIS-siz) + WebSocket
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 # DB bağlantısı
 # ---------------------------------------------------------------------------
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://caspian:12345@db:5432/caspian_db")
 
 pool: asyncpg.Pool | None = None
@@ -34,29 +35,91 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
 
-    # init.sql-i oxu və işlət
-    init_sql_path = os.path.join(os.path.dirname(__file__), "init.sql")
-    if os.path.exists(init_sql_path):
-        with open(init_sql_path, "r") as f:
-            sql = f.read()
-        async with pool.acquire() as conn:
-            try:
-                await conn.execute(sql)
-                print("✅ DB init tamamlandı")
-            except Exception as e:
-                print(f"⚠️ DB init xətası: {e}")
+    async with pool.acquire() as conn:
+        # PostGIS yoxdur — lon/lat FLOAT istifadə edirik
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS vessels (
+                id SERIAL PRIMARY KEY,
+                mmsi VARCHAR(9) UNIQUE NOT NULL,
+                name VARCHAR(100),
+                vessel_type VARCHAR(50),
+                flag VARCHAR(3),
+                length_m FLOAT,
+                width_m FLOAT,
+                lon FLOAT,
+                lat FLOAT,
+                speed_knots FLOAT,
+                course_deg FLOAT,
+                status VARCHAR(20) DEFAULT 'active',
+                cargo_tons FLOAT,
+                destination VARCHAR(100),
+                eta TIMESTAMPTZ,
+                eta_confidence FLOAT,
+                last_seen TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                id SERIAL PRIMARY KEY,
+                vessel_mmsi VARCHAR(9),
+                alert_type VARCHAR(50),
+                severity VARCHAR(10),
+                message TEXT,
+                lon FLOAT,
+                lat FLOAT,
+                resolved BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS port_events (
+                id SERIAL PRIMARY KEY,
+                vessel_mmsi VARCHAR(9),
+                event_type VARCHAR(30),
+                port VARCHAR(50),
+                cargo_tons FLOAT,
+                wagons_needed INT,
+                occurred_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+
+        existing = await conn.fetchval("SELECT COUNT(*) FROM vessels")
+        if existing == 0:
+            await conn.execute("""
+                INSERT INTO vessels (mmsi, name, vessel_type, flag, lon, lat,
+                    speed_knots, course_deg, cargo_tons, destination, eta, eta_confidence)
+                VALUES
+                ('423001001','BAKU STAR','cargo','AZ',49.8,40.4,8.2,185,450,'Bakı Limanı',NOW()+INTERVAL '4 hours',0.87),
+                ('423001002','XƏZƏR QIZILI','tanker','AZ',51.2,41.8,6.5,220,820,'Bakı Limanı',NOW()+INTERVAL '7 hours',0.72),
+                ('423001003','ABŞERON','ferry','AZ',50.1,43.2,11.0,195,180,'Aktau',NOW()+INTERVAL '11 hours',0.91),
+                ('436001001','AKTAU EXPRESS','cargo','KZ',51.8,44.1,7.8,170,560,'Bakı Limanı',NOW()+INTERVAL '9 hours',0.68),
+                ('436001002','MANGISTAU','tanker','KZ',52.4,42.5,5.2,210,910,'Bakı Limanı',NOW()+INTERVAL '14 hours',0.55),
+                ('438001001','TURKMENBASHI','cargo','TM',53.0,40.0,9.1,270,320,'Türkmənbaşı',NOW()+INTERVAL '6 hours',0.83),
+                ('423001004','NEFTÇALA','cargo','AZ',50.8,40.1,7.3,200,300,'Bakı Limanı',NOW()+INTERVAL '5 hours',0.79),
+                ('436001003','KAZAKH PRIDE','tanker','KZ',51.9,44.5,6.1,215,750,'Bakı Limanı',NOW()+INTERVAL '12 hours',0.61)
+                ON CONFLICT (mmsi) DO NOTHING;
+            """)
+            await conn.execute("""
+                INSERT INTO alerts (vessel_mmsi, alert_type, severity, message, lon, lat)
+                VALUES
+                ('436001002','long_wait','medium','MANGISTAU gəmisi 3 saatdır hərəkətsizdir — texniki problem şübhəsi',52.4,42.5),
+                ('423001002','storm_zone','high','XƏZƏR QIZILI fırtına zonasına yaxınlaşır',51.2,41.8)
+                ON CONFLICT DO NOTHING;
+            """)
+
+        print("✅ DB init tamamlandı")
 
     yield
     await pool.close()
 
 
 app = FastAPI(title="Caspian Corridor Intelligence API", lifespan=lifespan)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
 async def read_index():
-    return FileResponse('static/index.html')
+    return FileResponse("static/index.html")
 
 
 app.add_middleware(
@@ -69,6 +132,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Modellər
 # ---------------------------------------------------------------------------
+
 class VesselOut(BaseModel):
     mmsi: str
     name: str
@@ -110,10 +174,10 @@ class ETAResponse(BaseModel):
     speed_knots: float
     weather_factor: float
 
-
 # ---------------------------------------------------------------------------
 # Yardımçı funksiyalar
 # ---------------------------------------------------------------------------
+
 BAKU_PORT = (49.865, 40.342)  # (lon, lat)
 
 
@@ -143,10 +207,10 @@ def calculate_eta(lon: float, lat: float, speed_knots: float, cargo_tons: float)
         weather_factor=weather_factor,
     )
 
+# ---------------------------------------------------------------------------
+# Əsas Endpoints
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "caspian-corridor-intelligence"}
@@ -156,8 +220,7 @@ async def health():
 async def get_vessels(status: Optional[str] = None):
     query = """
         SELECT mmsi, name, vessel_type, flag,
-               lon, lat,
-               speed_knots, course_deg, status, cargo_tons,
+               lon, lat, speed_knots, course_deg, status, cargo_tons,
                destination, eta, eta_confidence, last_seen
         FROM vessels
         WHERE ($1::text IS NULL OR status = $1)
@@ -169,14 +232,13 @@ async def get_vessels(status: Optional[str] = None):
 
 @app.get("/vessels/{mmsi}", response_model=VesselOut)
 async def get_vessel(mmsi: str):
-    query = """
-        SELECT mmsi, name, vessel_type, flag,
-               lon, lat,
-               speed_knots, course_deg, status, cargo_tons,
-               destination, eta, eta_confidence, last_seen
-        FROM vessels WHERE mmsi = $1
-    """
-    row = await pool.fetchrow(query, mmsi)
+    row = await pool.fetchrow(
+        """SELECT mmsi, name, vessel_type, flag,
+                  lon, lat, speed_knots, course_deg, status, cargo_tons,
+                  destination, eta, eta_confidence, last_seen
+           FROM vessels WHERE mmsi = $1""",
+        mmsi,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Gəmi tapılmadı")
     return dict(row)
@@ -193,7 +255,7 @@ async def get_vessel_eta(mmsi: str):
     result = calculate_eta(row["lon"], row["lat"], row["speed_knots"], row["cargo_tons"])
     result.mmsi = mmsi
     await pool.execute(
-        "UPDATE vessels SET eta = $1, eta_confidence = $2, updated_at = NOW() WHERE mmsi = $3",
+        "UPDATE vessels SET eta=$1, eta_confidence=$2, updated_at=NOW() WHERE mmsi=$3",
         result.eta, result.confidence, mmsi,
     )
     return result
@@ -201,14 +263,13 @@ async def get_vessel_eta(mmsi: str):
 
 @app.get("/port/summary", response_model=PortSummary)
 async def get_port_summary():
-    query = """
-        SELECT mmsi, name, vessel_type, cargo_tons, eta, eta_confidence, lon, lat
-        FROM vessels
-        WHERE destination = 'Bakı Limanı'
-          AND eta BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
-        ORDER BY eta ASC
-    """
-    rows = await pool.fetch(query)
+    rows = await pool.fetch(
+        """SELECT mmsi, name, vessel_type, cargo_tons, eta, eta_confidence, lon, lat
+           FROM vessels
+           WHERE destination = 'Bakı Limanı'
+             AND eta BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
+           ORDER BY eta ASC"""
+    )
     total_cargo = sum(r["cargo_tons"] for r in rows)
     wagons = math.ceil(total_cargo / 80)
     return PortSummary(
@@ -222,8 +283,8 @@ async def get_port_summary():
 @app.get("/alerts", response_model=list[AlertOut])
 async def get_alerts(resolved: bool = False):
     rows = await pool.fetch(
-        "SELECT id, vessel_mmsi, alert_type, severity, message, created_at "
-        "FROM alerts WHERE resolved = $1 ORDER BY created_at DESC LIMIT 50",
+        """SELECT id, vessel_mmsi, alert_type, severity, message, created_at
+           FROM alerts WHERE resolved=$1 ORDER BY created_at DESC LIMIT 50""",
         resolved,
     )
     return [dict(r) for r in rows]
@@ -231,35 +292,26 @@ async def get_alerts(resolved: bool = False):
 
 @app.get("/vessels/nearby/port")
 async def vessels_near_port(radius_km: float = 50):
-    """Bakı limanına {radius_km} km yaxın gəmilər — Haversine ilə."""
-    rows = await pool.fetch("SELECT mmsi, name, vessel_type, lon, lat FROM vessels")
+    rows = await pool.fetch(
+        "SELECT mmsi, name, vessel_type, lon, lat FROM vessels"
+    )
     result = []
     for r in rows:
         dist = haversine_km(r["lon"], r["lat"], BAKU_PORT[0], BAKU_PORT[1])
         if dist <= radius_km:
-            result.append({
-                "mmsi": r["mmsi"],
-                "name": r["name"],
-                "vessel_type": r["vessel_type"],
-                "lon": r["lon"],
-                "lat": r["lat"],
-                "dist_km": round(dist, 1),
-            })
+            result.append({**dict(r), "dist_km": round(dist, 1)})
     result.sort(key=lambda x: x["dist_km"])
     return result
 
-
 # ---------------------------------------------------------------------------
-# Əskik olan 4 endpoint
+# AI Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/api/reschedule")
 async def api_reschedule():
     """Hava şəraitinə görə dəmir yolu sinxronizasiyası."""
     rows = await pool.fetch(
-        """SELECT mmsi, name, cargo_tons,
-                  ST_X(location) AS lon, ST_Y(location) AS lat,
-                  speed_knots, eta
+        """SELECT mmsi, name, cargo_tons, lon, lat, speed_knots, eta
            FROM vessels
            WHERE destination = 'Bakı Limanı' AND status = 'active'
            ORDER BY eta ASC LIMIT 10"""
@@ -287,17 +339,12 @@ async def api_reschedule():
 async def api_anomalies():
     """Anomaliya aşkarlanması — sürət, zona, fırtına."""
     rows = await pool.fetch(
-        """SELECT mmsi, name,
-                  ST_X(location) AS lon, ST_Y(location) AS lat,
-                  speed_knots, status
-           FROM vessels WHERE status = 'active'"""
+        "SELECT mmsi, name, lon, lat, speed_knots, status FROM vessels WHERE status = 'active'"
     )
     weather = ai_core.get_current_weather()
     anomalies = []
     for r in rows:
-        status = ai_core.detect_anomaly(
-            r["speed_knots"], r["lat"], r["lon"], weather
-        )
+        status = ai_core.detect_anomaly(r["speed_knots"], r["lat"], r["lon"], weather)
         if status != "✅ Stabil":
             anomalies.append({
                 "mmsi": r["mmsi"],
@@ -307,10 +354,9 @@ async def api_anomalies():
                 "lat": r["lat"],
                 "lon": r["lon"],
             })
-    # DB-dəki alertləri də əlavə et
     db_alerts = await pool.fetch(
-        "SELECT vessel_mmsi, alert_type, severity, message, created_at "
-        "FROM alerts WHERE resolved = FALSE ORDER BY created_at DESC LIMIT 20"
+        """SELECT vessel_mmsi, alert_type, severity, message, created_at
+           FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"""
     )
     return {
         "weather": weather,
@@ -324,8 +370,7 @@ async def api_anomalies():
 async def api_eta_all():
     """Bütün aktiv gəmilərin ETA hesablaması."""
     rows = await pool.fetch(
-        """SELECT mmsi, name, vessel_type, flag, cargo_tons,
-                  ST_X(location) AS lon, ST_Y(location) AS lat,
+        """SELECT mmsi, name, vessel_type, flag, cargo_tons, lon, lat,
                   speed_knots, destination
            FROM vessels WHERE status = 'active'"""
     )
@@ -355,14 +400,10 @@ async def api_satellite():
     """Peyk görüntüsü məlumatı (Azersky simulasiyası)."""
     feed = ai_core.get_satellite_feed()
     vessel_count = await pool.fetchval("SELECT COUNT(*) FROM vessels WHERE status = 'active'")
-    near_port = await pool.fetchval(
-        """SELECT COUNT(*) FROM vessels
-           WHERE ST_DWithin(
-               location::geography,
-               ST_SetSRID(ST_MakePoint($1,$2),4326)::geography,
-               50000
-           )""",
-        BAKU_PORT[0], BAKU_PORT[1]
+    all_vessels = await pool.fetch("SELECT lon, lat FROM vessels WHERE status = 'active'")
+    near_port = sum(
+        1 for r in all_vessels
+        if haversine_km(r["lon"], r["lat"], BAKU_PORT[0], BAKU_PORT[1]) <= 50
     )
     return {
         **feed,
@@ -373,10 +414,10 @@ async def api_satellite():
         "next_pass_minutes": random.randint(8, 45),
     }
 
-
 # ---------------------------------------------------------------------------
 # WebSocket — real vaxt gəmi hərəkəti
 # ---------------------------------------------------------------------------
+
 class ConnectionManager:
     def __init__(self):
         self.active: list[WebSocket] = []
@@ -386,7 +427,8 @@ class ConnectionManager:
         self.active.append(ws)
 
     def disconnect(self, ws: WebSocket):
-        self.active.remove(ws)
+        if ws in self.active:
+            self.active.remove(ws)
 
     async def broadcast(self, data: dict):
         msg = json.dumps(data, default=str)
@@ -397,7 +439,8 @@ class ConnectionManager:
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self.active.remove(ws)
+            if ws in self.active:
+                self.active.remove(ws)
 
 
 manager = ConnectionManager()
@@ -410,8 +453,7 @@ async def simulate_vessel_movement():
             continue
         try:
             rows = await pool.fetch(
-                "SELECT mmsi, lon, lat, speed_knots, course_deg, status "
-                "FROM vessels WHERE status = 'active'"
+                "SELECT mmsi, lon, lat, speed_knots, course_deg, status FROM vessels WHERE status = 'active'"
             )
             updates = []
             for r in rows:
@@ -420,7 +462,7 @@ async def simulate_vessel_movement():
                 new_lon = r["lon"] + dlon + random.uniform(-0.001, 0.001)
                 new_lat = r["lat"] + dlat + random.uniform(-0.001, 0.001)
                 await pool.execute(
-                    "UPDATE vessels SET lon = $1, lat = $2, last_seen = NOW() WHERE mmsi = $3",
+                    "UPDATE vessels SET lon=$1, lat=$2, last_seen=NOW() WHERE mmsi=$3",
                     new_lon, new_lat, r["mmsi"],
                 )
                 updates.append({
@@ -444,10 +486,10 @@ async def vessel_stream(ws: WebSocket):
     await manager.connect(ws)
     try:
         rows = await pool.fetch(
-            "SELECT mmsi, name, vessel_type, flag, "
-            "lon, lat, "
-            "speed_knots, course_deg, status, cargo_tons, destination, eta "
-            "FROM vessels ORDER BY last_seen DESC"
+            """SELECT mmsi, name, vessel_type, flag,
+                      lon, lat, speed_knots, course_deg,
+                      status, cargo_tons, destination, eta
+               FROM vessels ORDER BY last_seen DESC"""
         )
         await ws.send_text(json.dumps({
             "type": "initial",
