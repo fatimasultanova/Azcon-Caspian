@@ -250,6 +250,131 @@ async def vessels_near_port(radius_km: float = 50):
 
 
 # ---------------------------------------------------------------------------
+# Əskik olan 4 endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/reschedule")
+async def api_reschedule():
+    """Hava şəraitinə görə dəmir yolu sinxronizasiyası."""
+    rows = await pool.fetch(
+        """SELECT mmsi, name, cargo_tons,
+                  ST_X(location) AS lon, ST_Y(location) AS lat,
+                  speed_knots, eta
+           FROM vessels
+           WHERE destination = 'Bakı Limanı' AND status = 'active'
+           ORDER BY eta ASC LIMIT 10"""
+    )
+    weather = ai_core.get_current_weather()
+    result = []
+    for r in rows:
+        eta_hours = ai_core.calculate_eta(r["lat"], r["lon"], r["speed_knots"], weather)
+        rail_time = ai_core.dynamic_rail_sync(eta_hours, weather)
+        wagons = math.ceil((r["cargo_tons"] or 0) / 80)
+        result.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            "cargo_tons": r["cargo_tons"],
+            "eta_hours": eta_hours,
+            "rail_ready_time": rail_time,
+            "wagons_needed": wagons,
+            "weather_status": weather["status"],
+            "is_stormy": weather["is_stormy"],
+        })
+    return {"weather": weather, "schedule": result}
+
+
+@app.get("/api/anomalies")
+async def api_anomalies():
+    """Anomaliya aşkarlanması — sürət, zona, fırtına."""
+    rows = await pool.fetch(
+        """SELECT mmsi, name,
+                  ST_X(location) AS lon, ST_Y(location) AS lat,
+                  speed_knots, status
+           FROM vessels WHERE status = 'active'"""
+    )
+    weather = ai_core.get_current_weather()
+    anomalies = []
+    for r in rows:
+        status = ai_core.detect_anomaly(
+            r["speed_knots"], r["lat"], r["lon"], weather
+        )
+        if status != "✅ Stabil":
+            anomalies.append({
+                "mmsi": r["mmsi"],
+                "name": r["name"],
+                "anomaly": status,
+                "speed_knots": r["speed_knots"],
+                "lat": r["lat"],
+                "lon": r["lon"],
+            })
+    # DB-dəki alertləri də əlavə et
+    db_alerts = await pool.fetch(
+        "SELECT vessel_mmsi, alert_type, severity, message, created_at "
+        "FROM alerts WHERE resolved = FALSE ORDER BY created_at DESC LIMIT 20"
+    )
+    return {
+        "weather": weather,
+        "ai_anomalies": anomalies,
+        "db_alerts": [dict(a) for a in db_alerts],
+        "total": len(anomalies) + len(db_alerts),
+    }
+
+
+@app.get("/api/eta/all")
+async def api_eta_all():
+    """Bütün aktiv gəmilərin ETA hesablaması."""
+    rows = await pool.fetch(
+        """SELECT mmsi, name, vessel_type, flag, cargo_tons,
+                  ST_X(location) AS lon, ST_Y(location) AS lat,
+                  speed_knots, destination
+           FROM vessels WHERE status = 'active'"""
+    )
+    weather = ai_core.get_current_weather()
+    result = []
+    for r in rows:
+        eta_obj = calculate_eta(r["lon"], r["lat"], r["speed_knots"], r["cargo_tons"] or 0)
+        eta_obj.mmsi = r["mmsi"]
+        result.append({
+            "mmsi": r["mmsi"],
+            "name": r["name"],
+            "vessel_type": r["vessel_type"],
+            "flag": r["flag"],
+            "destination": r["destination"],
+            "eta": eta_obj.eta,
+            "confidence": eta_obj.confidence,
+            "distance_km": eta_obj.distance_km,
+            "speed_knots": eta_obj.speed_knots,
+            "weather_factor": eta_obj.weather_factor,
+        })
+    result.sort(key=lambda x: x["eta"])
+    return {"weather": weather, "vessels": result, "count": len(result)}
+
+
+@app.get("/api/satellite")
+async def api_satellite():
+    """Peyk görüntüsü məlumatı (Azersky simulasiyası)."""
+    feed = ai_core.get_satellite_feed()
+    vessel_count = await pool.fetchval("SELECT COUNT(*) FROM vessels WHERE status = 'active'")
+    near_port = await pool.fetchval(
+        """SELECT COUNT(*) FROM vessels
+           WHERE ST_DWithin(
+               location::geography,
+               ST_SetSRID(ST_MakePoint($1,$2),4326)::geography,
+               50000
+           )""",
+        BAKU_PORT[0], BAKU_PORT[1]
+    )
+    return {
+        **feed,
+        "active_vessels_db": vessel_count,
+        "vessels_near_baku_port": near_port,
+        "coverage_area": "Xəzər dənizi (36.5°N–47.1°N, 49°E–54.5°E)",
+        "resolution_m": 1.5,
+        "next_pass_minutes": random.randint(8, 45),
+    }
+
+
+# ---------------------------------------------------------------------------
 # WebSocket — real vaxt gəmi hərəkəti
 # ---------------------------------------------------------------------------
 class ConnectionManager:
