@@ -309,17 +309,18 @@ async def vessels_near_port(radius_km: float = 50):
 
 @app.get("/api/reschedule")
 async def api_reschedule():
-    """Hava şəraitinə görə dəmir yolu sinxronizasiyası."""
     rows = await pool.fetch(
         """SELECT mmsi, name, cargo_tons, lon, lat, speed_knots, eta
            FROM vessels
            WHERE destination = 'Bakı Limanı' AND status = 'active'
-           ORDER BY eta ASC LIMIT 10"""
+           ORDER BY eta ASC LIMIT 15"""
     )
     weather = ai_core.get_current_weather()
     result = []
     for r in rows:
-        eta_hours = ai_core.calculate_eta(r["lat"], r["lon"], r["speed_knots"], weather)
+        # Köhnə ai_engine: calculate_eta(lat, lon, speed, weather) → float
+        eta_hours = ai_core.calculate_eta(r["lat"], r["lon"], r["speed_knots"] or 0, weather)
+        # Köhnə ai_engine: dynamic_rail_sync(eta_hours, weather) → str
         rail_time = ai_core.dynamic_rail_sync(eta_hours, weather)
         wagons = math.ceil((r["cargo_tons"] or 0) / 80)
         result.append({
@@ -337,26 +338,32 @@ async def api_reschedule():
 
 @app.get("/api/anomalies")
 async def api_anomalies():
-    """Anomaliya aşkarlanması — sürət, zona, fırtına."""
     rows = await pool.fetch(
-        "SELECT mmsi, name, lon, lat, speed_knots, status FROM vessels WHERE status = 'active'"
+        "SELECT mmsi, name, lon, lat, speed_knots, course_deg, status, cargo_tons FROM vessels WHERE status != 'inactive'"
     )
     weather = ai_core.get_current_weather()
     anomalies = []
     for r in rows:
-        status = ai_core.detect_anomaly(r["speed_knots"], r["lat"], r["lon"], weather)
-        if status != "✅ Stabil":
+        # Köhnə ai_engine: detect_anomaly(speed, lat, lon, weather) → str
+        result = ai_core.detect_anomaly(
+            r["speed_knots"] or 0,
+            r["lat"],
+            r["lon"],
+            weather,
+        )
+        if result != "✅ Stabil":
             anomalies.append({
                 "mmsi": r["mmsi"],
                 "name": r["name"],
-                "anomaly": status,
-                "speed_knots": r["speed_knots"],
-                "lat": r["lat"],
                 "lon": r["lon"],
+                "lat": r["lat"],
+                "anomaly": result,
+                "speed_knots": r["speed_knots"],
             })
+
     db_alerts = await pool.fetch(
-        """SELECT vessel_mmsi, alert_type, severity, message, created_at
-           FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"""
+        "SELECT vessel_mmsi, alert_type, severity, message, created_at "
+        "FROM alerts WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 20"
     )
     return {
         "weather": weather,
